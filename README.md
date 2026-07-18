@@ -11,6 +11,66 @@ A modular, schema-driven Python pipeline for advanced bibliometric research. It 
 - **Geographic & Keyword CAGR Trends**: Tracks the chronological evolution of countries and research keyword growth.
 - **Modern Web Dashboard**: Features a fast FastAPI backend and a Next.js (React) visualization panel.
 
+## System Architecture
+
+```mermaid
+flowchart TD
+    %% Inputs
+    subgraph Inputs ["Data Inputs"]
+        in_query["Search Query & Year Range"]
+        in_file["Local CSV / Parquet File"]
+    end
+
+    %% Collectors
+    subgraph Scraping ["Autonomous Scraping (UnifiedCollector)"]
+        api_oa["OpenAlex API"]
+        api_ss["Semantic Scholar API"]
+        api_cr["Crossref API"]
+    end
+
+    %% Core Pipeline Processes
+    subgraph Core ["Ingestion & Verification"]
+        pydantic_val["Pydantic Schema Validation"]
+        dedup["Title/DOI Normalization & Metadata Merging"]
+        year_filter["Null-Year Filtering"]
+    end
+
+    %% Analysis Blocks
+    subgraph Processors ["Modular Analysis Engines"]
+        nlp_proc["NLP Engine (BERTopic)"]
+        country_proc["Country Analysis"]
+        net_proc["Network Analysis (cuGraph GPU / NetworkX CPU)"]
+        citation_proc["Citation Analysis (Co-Citation & Coupling)"]
+    end
+
+    %% Outputs
+    subgraph DataOutputs ["Generated Data & Reports (pipeline_results/)"]
+        out_csv["Cleaned CSV / Parquet Datasets"]
+        out_plots["Trend PDF Plots (CAGR, Growth, Evolution)"]
+        out_net["Network Graphs (Co-authorship, percolation)"]
+    end
+
+    subgraph WebDashboard ["Dashboard UI"]
+        web_app["Next.js Web Panel (Interactive Networks & Insights)"]
+    end
+
+    %% Data Flow Connections
+    in_query --> Scraping
+    api_oa & api_ss & api_cr --> dedup
+    in_file --> pydantic_val
+    dedup --> pydantic_val
+    pydantic_val --> year_filter
+
+    year_filter --> nlp_proc & country_proc & net_proc & citation_proc
+
+    nlp_proc --> out_plots & out_csv
+    country_proc --> out_plots & out_csv
+    net_proc --> out_net & out_csv
+    citation_proc --> out_net & out_csv
+
+    out_csv & out_plots & out_net --> WebDashboard
+```
+
 ## Project Structure
 To keep Git tracking lightweight and clean, the repository is structured as:
 - `/src`: Core source code (API, pipeline orchestration, viz, collectors, network engines).
