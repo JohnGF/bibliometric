@@ -29,11 +29,13 @@ This script automatically resolves dependencies, handles environments, and runs 
 
 To run the CLI pipeline directly on the hardware:
 ```bash
-# Universal (using the local virtualenv)
+# Universal (using local virtualenv)
 .venv/bin/biblio-pipeline --query "brain-computer interface" --limit 100 --start-year 2020 --end-year 2024
+.venv/bin/biblio-pipeline --file data/collected_brain-computer_interface.csv
 
 # Modern Alternative (if you have 'uv' installed)
 uv run biblio-pipeline --query "brain-computer interface" --limit 100 --start-year 2020 --end-year 2024
+uv run biblio-pipeline --file data/collected_brain-computer_interface.csv
 ```
 
 ### Run via Container (Legacy)

@@ -33,9 +33,10 @@ This script will automatically resolve Python and Node.js dependencies, link you
 - **FastAPI backend** on [http://localhost:8000](http://localhost:8000)
 - **Next.js dashboard** on [http://localhost:3000](http://localhost:3000)
 
-### 2. Run the CLI Scraper
-You can execute the pipeline directly in your terminal using either the universal virtual environment path or **`uv run`**:
+### 2. Run the CLI Scraper & Pipeline
+You can run autonomous collections or execute the analysis pipeline on local files using the `biblio-pipeline` command:
 
+#### A. Fetch papers and run analysis (Autonomous mode)
 ```bash
 # Universal (using the local virtualenv)
 .venv/bin/biblio-pipeline --query "brain-computer interface" --limit 200 --start-year 2020 --end-year 2025
@@ -43,6 +44,17 @@ You can execute the pipeline directly in your terminal using either the universa
 # Modern Alternative (if you have 'uv' installed)
 uv run biblio-pipeline --query "brain-computer interface" --limit 200 --start-year 2020 --end-year 2025
 ```
+
+#### B. Run analysis on a local dataset file (e.g. CSV/Parquet output from scrapers)
+This generates the yearly growth charts, country collaborations, BERTopic clusters, and co-authorship graphs:
+```bash
+# Universal (using the local virtualenv)
+.venv/bin/biblio-pipeline --file data/collected_brain-computer_interface.csv
+
+# Modern Alternative (if you have 'uv' installed)
+uv run biblio-pipeline --file data/collected_brain-computer_interface.csv
+```
+Outputs (PDFs, CSVs, and interactive network files) will be written directly to the `pipeline_results/` directory.
 
 ---
 
