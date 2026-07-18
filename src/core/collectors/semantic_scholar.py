@@ -70,7 +70,8 @@ class SemanticScholarCollector:
         rows = []
         for res in results:
             authors = [a.get("name", "") for a in res.get("authors", [])]
-            venue = res.get("venue") or res.get("publicationVenue", {}).get("name", "")
+            pub_venue = res.get("publicationVenue") or {}
+            venue = res.get("venue") or pub_venue.get("name", "")
             
             row = {
                 "Title": res.get("title"),
