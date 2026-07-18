@@ -6,7 +6,7 @@ This list tracks planned enhancements and advanced features to elevate the bibli
 
 ## 🟥 Priority 1: Scraper Stability, Metadata Completeness & New Sources
 
-- [ ] **Add New Scrapers/Collectors**:
+- [x] **Add New Scrapers/Collectors**:
   - **PubMed (NCBI Entrez E-utilities)**: Essential for medical and life sciences research (public API, no keys required).
   - **Elsevier (Scopus Search API)**: High-quality citation data and keywords. Requires Elsevier API Key (`X-ELS-APIKey`).
   - **Web of Science (WoS API)**: High-impact indexing. Requires Clarivate WoS API Key.
