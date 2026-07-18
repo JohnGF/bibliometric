@@ -93,3 +93,19 @@ def test_unified_collector_merge_metadata():
     assert row["Cite Count"] == 15
     assert "OpenAlex" in row["Source"] and "Semantic Scholar" in row["Source"]
     assert row["Author Keywords"] == "algorithms; computing; quantum"
+
+from src.core.collectors.pubmed import PubMedCollector
+from src.core.collectors.elsevier import ElsevierCollector
+from src.core.collectors.wos import WebOfScienceCollector
+
+def test_pubmed_collector_init():
+    collector = PubMedCollector()
+    assert collector.SEARCH_URL == "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+
+def test_elsevier_collector_init():
+    collector = ElsevierCollector(api_key="dummy_key")
+    assert collector.headers["X-ELS-APIKey"] == "dummy_key"
+
+def test_wos_collector_init():
+    collector = WebOfScienceCollector(api_key="dummy_key")
+    assert collector.headers["X-ApiKey"] == "dummy_key"

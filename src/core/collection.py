@@ -5,6 +5,9 @@ import os
 from src.core.collectors.openalex import OpenAlexCollector
 from src.core.collectors.semantic_scholar import SemanticScholarCollector
 from src.core.collectors.crossref import CrossrefCollector
+from src.core.collectors.pubmed import PubMedCollector
+from src.core.collectors.elsevier import ElsevierCollector
+from src.core.collectors.wos import WebOfScienceCollector
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +20,18 @@ class UnifiedCollector:
         ss_key = self.config.get("ss_api_key") or os.environ.get("SS_API_KEY")
         cr_email = self.config.get("crossref_email") or os.environ.get("CROSSREF_EMAIL") or oa_email
         
+        pm_key = self.config.get("pubmed_api_key") or os.environ.get("PUBMED_API_KEY")
+        scopus_key = self.config.get("scopus_api_key") or os.environ.get("SCOPUS_API_KEY")
+        scopus_token = self.config.get("scopus_inst_token") or os.environ.get("SCOPUS_INST_TOKEN")
+        wos_key = self.config.get("wos_api_key") or os.environ.get("WOS_API_KEY")
+        
         self.collectors = {
             "openalex": OpenAlexCollector(email=oa_email),
             "semantic_scholar": SemanticScholarCollector(api_key=ss_key),
-            "crossref": CrossrefCollector(email=cr_email)
+            "crossref": CrossrefCollector(email=cr_email),
+            "pubmed": PubMedCollector(api_key=pm_key),
+            "scopus": ElsevierCollector(api_key=scopus_key, inst_token=scopus_token),
+            "web_of_science": WebOfScienceCollector(api_key=wos_key),
         }
 
     def fetch_all(self, query: str, limit_per_source: int = 100, sources: Optional[List[str]] = None, 

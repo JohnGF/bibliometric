@@ -181,6 +181,10 @@ def main():
     parser.add_argument("--openalex-email", type=str, help="Email for OpenAlex polite pool")
     parser.add_argument("--ss-api-key", type=str, help="API Key for Semantic Scholar")
     parser.add_argument("--crossref-email", type=str, help="Email for Crossref User-Agent")
+    parser.add_argument("--pubmed-api-key", type=str, help="API Key for PubMed (optional)")
+    parser.add_argument("--scopus-api-key", type=str, help="API Key for Elsevier Scopus")
+    parser.add_argument("--scopus-inst-token", type=str, help="Institutional Token for Scopus (optional)")
+    parser.add_argument("--wos-api-key", type=str, help="API Key for Web of Science")
 
     args = parser.parse_args()
     
@@ -191,6 +195,14 @@ def main():
         config["ss_api_key"] = args.ss_api_key
     if args.crossref_email:
         config["crossref_email"] = args.crossref_email
+    if args.pubmed_api_key:
+        config["pubmed_api_key"] = args.pubmed_api_key
+    if args.scopus_api_key:
+        config["scopus_api_key"] = args.scopus_api_key
+    if args.scopus_inst_token:
+        config["scopus_inst_token"] = args.scopus_inst_token
+    if args.wos_api_key:
+        config["wos_api_key"] = args.wos_api_key
 
     pipeline = BibliometricPipeline(output_dir=args.output, config=config)
 
