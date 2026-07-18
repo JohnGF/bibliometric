@@ -4,10 +4,14 @@ This list tracks planned enhancements and advanced features to elevate the bibli
 
 ---
 
-## 🟥 Priority 1: Scraper Stability & Metadata Completeness
+## 🟥 Priority 1: Scraper Stability, Metadata Completeness & New Sources
 
+- [ ] **Add New Scrapers/Collectors**:
+  - **PubMed (NCBI Entrez E-utilities)**: Essential for medical and life sciences research (public API, no keys required).
+  - **Elsevier (Scopus Search API)**: High-quality citation data and keywords. Requires Elsevier API Key (`X-ELS-APIKey`).
+  - **Web of Science (WoS API)**: High-impact indexing. Requires Clarivate WoS API Key.
 - [ ] **API Rate Limiting & Retries**:
-  - Implement exponential backoff retries (e.g. using `tenacity` or a custom retry decorator) in `src/core/collectors/` to handle `429 Too Many Requests` limits gracefully (especially for Semantic Scholar).
+  - Implement exponential backoff retries (e.g. using `tenacity` or a custom retry decorator) in `src/core/collectors/` to handle `429 Too Many Requests` limits gracefully.
   - Add request rate throttling/delays.
 - [ ] **Cross-Source DOI Enrichment**:
   - Update `UnifiedCollector` to run a secondary "enrichment pass." If a paper is fetched from one API but is missing an `Abstract` or `Author Keywords`, query OpenAlex or Semantic Scholar directly *by DOI* to pull and merge the missing metadata.
