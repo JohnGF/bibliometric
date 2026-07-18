@@ -34,9 +34,9 @@ This script will automatically resolve Python and Node.js dependencies, link you
 - **Next.js dashboard** on [http://localhost:3000](http://localhost:3000)
 
 ### 2. Run the CLI Scraper
-You can execute the pipeline directly in your terminal using the registered entrypoint inside your virtual environment:
+You can execute the pipeline directly in your terminal using **`uv run`**:
 ```bash
-.venv/bin/biblio-pipeline --query "brain-computer interface" --limit 200 --start-year 2020 --end-year 2025
+uv run biblio-pipeline --query "brain-computer interface" --limit 200 --start-year 2020 --end-year 2025
 ```
 
 ---

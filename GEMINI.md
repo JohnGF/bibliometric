@@ -29,7 +29,7 @@ This script automatically resolves dependencies, handles environments, and runs 
 
 To run the CLI pipeline directly on the hardware:
 ```bash
-.venv/bin/biblio-pipeline --query "brain-computer interface" --limit 100 --start-year 2020 --end-year 2024
+uv run biblio-pipeline --query "brain-computer interface" --limit 100 --start-year 2020 --end-year 2024
 ```
 
 ### Run via Container (Legacy)
