@@ -13,6 +13,9 @@ class Visualization:
         """Plots publication counts and growth percentages."""
         yearly_counts = df.group_by("Year").len().sort("Year")
         
+        # Cast len to Int64 to prevent unsigned underflow when counts decrease
+        yearly_counts = yearly_counts.with_columns(pl.col("len").cast(pl.Int64))
+        
         # Calculate growth
         yearly_counts = yearly_counts.with_columns(
             pl.col("len").shift(1).alias("previous_year_len")
