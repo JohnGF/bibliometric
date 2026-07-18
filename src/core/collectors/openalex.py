@@ -2,6 +2,7 @@ import httpx
 import pandas as pd
 from typing import List, Dict, Optional
 import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +33,14 @@ class OpenAlexCollector:
                 "search": query,
                 "per_page": current_limit,
                 "page": page,
-                "select": "title,abstract_inverted_index,authorships,publication_year,doi,ids,keywords,concepts,cited_by_count",
+                "select": "title,abstract_inverted_index,authorships,publication_year,doi,ids,keywords,concepts,cited_by_count,referenced_works",
             }
             if filters:
                 params["filter"] = ",".join(filters)
                 
             logger.info(f"Fetching page {page} from OpenAlex for query: {query} (Limit page: {current_limit})")
             try:
-                response = httpx.get(self.BASE_URL, params=params, headers=self.headers, timeout=30.0)
-                response.raise_for_status()
-                data = response.json()
+                data = self._make_request(params)
                 results = data.get("results", [])
                 if not results:
                     break
@@ -55,6 +54,39 @@ class OpenAlexCollector:
                 break
                 
         return self._to_dataframe(all_results)
+
+    def fetch_by_doi(self, doi: str) -> Optional[Dict]:
+        """Fetches a single paper by DOI."""
+        url = f"{self.BASE_URL}/doi:{doi}"
+        try:
+            # We don't need all params, just make a direct get
+            @retry(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=2, max=10),
+                retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
+                reraise=True
+            )
+            def _fetch():
+                response = httpx.get(url, headers=self.headers, timeout=15.0)
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return response.json()
+            return _fetch()
+        except Exception as e:
+            logger.error(f"Error fetching DOI {doi} from OpenAlex: {e}")
+            return None
+
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
+        reraise=True
+    )
+    def _make_request(self, params: Dict) -> Dict:
+        response = httpx.get(self.BASE_URL, params=params, headers=self.headers, timeout=30.0)
+        response.raise_for_status()
+        return response.json()
 
     def _reconstruct_abstract(self, inverted_index: Optional[Dict]) -> str:
         if not inverted_index:
@@ -78,6 +110,9 @@ class OpenAlexCollector:
             
             keywords = [k.get("display_name", "") for k in res.get("keywords", [])]
             
+
+            referenced_works = res.get("referenced_works", [])
+
             row = {
                 "Title": res.get("title"),
                 "Abstract": self._reconstruct_abstract(res.get("abstract_inverted_index")),
@@ -88,6 +123,7 @@ class OpenAlexCollector:
                 "EID": res.get("ids", {}).get("openalex"),
                 "Author Keywords": "; ".join(filter(None, keywords)),
                 "Cite Count": res.get("cited_by_count", 0),
+                "References": "; ".join(referenced_works),
                 "Source": "OpenAlex"
             }
             rows.append(row)

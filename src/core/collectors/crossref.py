@@ -2,6 +2,7 @@ import httpx
 import pandas as pd
 from typing import List, Dict, Optional
 import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,7 @@ class CrossrefCollector:
                 
             logger.info(f"Fetching papers from Crossref (offset={offset}, limit={current_limit})")
             try:
-                response = httpx.get(self.BASE_URL, params=params, headers=self.headers, timeout=30.0)
-                response.raise_for_status()
-                data = response.json()
+                data = self._make_request(params)
                 results = data.get("message", {}).get("items", [])
                 if not results:
                     break
@@ -57,6 +56,17 @@ class CrossrefCollector:
                 break
                 
         return self._to_dataframe(all_results)
+
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
+        reraise=True
+    )
+    def _make_request(self, params: Dict) -> Dict:
+        response = httpx.get(self.BASE_URL, params=params, headers=self.headers, timeout=30.0)
+        response.raise_for_status()
+        return response.json()
 
     def _to_dataframe(self, results: List[Dict]) -> pd.DataFrame:
         rows = []
