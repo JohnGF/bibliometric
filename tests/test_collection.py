@@ -109,3 +109,26 @@ def test_elsevier_collector_init():
 def test_wos_collector_init():
     collector = WebOfScienceCollector(api_key="dummy_key")
     assert collector.headers["X-ApiKey"] == "dummy_key"
+
+def test_unified_collector_transitive_merge():
+    class MockCollector:
+        def __init__(self, papers):
+            self.papers = papers
+        def fetch_papers(self, *args, **kwargs):
+            return pd.DataFrame(self.papers)
+
+    unified = UnifiedCollector()
+    unified.collectors = {
+        "source1": MockCollector([
+            {"Title": "Paper A", "DOI": "10.1", "Abstract": "Abstract A", "Cite Count": 5, "Source": "S1"},
+            {"Title": "Paper B", "DOI": "10.1", "Abstract": "Abstract B", "Cite Count": 10, "Source": "S2"}
+        ]),
+        "source2": MockCollector([
+            {"Title": "Paper B", "DOI": "10.2", "Abstract": "Abstract C", "Cite Count": 15, "Source": "S3"}
+        ])
+    }
+    
+    merged = unified.fetch_all("test query")
+    assert len(merged) == 1
+    row = merged.iloc[0]
+    assert row["Cite Count"] == 15

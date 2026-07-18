@@ -97,6 +97,7 @@ class BibliometricPipeline:
         validate_publications(df_pd)
         df = pl.from_pandas(df_pd)
         df = df.filter(pl.col("Year").is_not_null())
+        df = df.with_columns(pl.col("Year").cast(pl.Int64))
         
         # 2. Basic Visualization (Growth)
         logging.info("Generating yearly growth charts...")

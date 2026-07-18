@@ -107,35 +107,44 @@ class UnifiedCollector:
                         merged[col] = "; ".join(sorted(kws))
             return merged
 
-        # Assign group IDs based on normalized DOI or Title
-        group_ids = {}
-        current_group_id = 0
-        doi_to_gid = {}
-        title_to_gid = {}
+        # Define Union-Find for transitive grouping
+        n_rows = len(merged_df)
+        parent = list(range(n_rows))
         
-        row_gids = []
-        for _, row in merged_df.iterrows():
+        def find(i):
+            if parent[i] == i:
+                return i
+            parent[i] = find(parent[i])
+            return parent[i]
+            
+        def union(i, j):
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                parent[root_i] = root_j
+
+        # Map normalized DOI/Title to first seen row index
+        doi_to_idx = {}
+        title_to_idx = {}
+        
+        for idx, row in merged_df.iterrows():
             doi = row["normalized_doi"]
             title = row["normalized_title"]
             
-            gid = None
-            if doi and doi in doi_to_gid:
-                gid = doi_to_gid[doi]
-            elif title and title in title_to_gid:
-                gid = title_to_gid[title]
-                
-            if gid is None:
-                gid = current_group_id
-                current_group_id += 1
-                
             if doi:
-                doi_to_gid[doi] = gid
+                if doi in doi_to_idx:
+                    union(idx, doi_to_idx[doi])
+                else:
+                    doi_to_idx[doi] = idx
+                    
             if title:
-                title_to_gid[title] = gid
-                
-            row_gids.append(gid)
-            
-        merged_df["group_id"] = row_gids
+                if title in title_to_idx:
+                    union(idx, title_to_idx[title])
+                else:
+                    title_to_idx[title] = idx
+                    
+        # Assign unique group IDs based on representatives
+        merged_df["group_id"] = [find(i) for i in range(n_rows)]
         
         # Group by group_id and merge each group
         deduplicated_rows = []
