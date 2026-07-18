@@ -125,7 +125,7 @@ class Visualization:
             G.add_edge(row['source_id'], row['dest_id'], weight=row['weight'])
             
         # Layout calculation
-        pos = nx.spring_layout(G, k=0.18, iterations=100, seed=42)
+        pos = nx.spring_layout(G, k=0.35, iterations=100, seed=42)
         
         # Color mapping (community partitions)
         partitions = [G.nodes[n]['partition'] for n in G.nodes]
@@ -150,7 +150,9 @@ class Visualization:
             if G.nodes[n]['size'] >= 2 or len(G.nodes) < 30:
                 labels[n] = G.nodes[n]['name']
                 
-        nx.draw_networkx_labels(G, pos, labels=labels, font_size=8, font_family="sans-serif", font_weight="bold", alpha=0.8)
+        # Offset label positions slightly above the nodes to avoid overlapping
+        pos_labels = {node: (coords[0], coords[1] + 0.035) for node, coords in pos.items()}
+        nx.draw_networkx_labels(G, pos_labels, labels=labels, font_size=8, font_family="sans-serif", font_weight="bold", alpha=0.8)
         
         plt.title("Co-authorship Network & Louvain Communities", fontsize=18, pad=15)
         plt.axis('off')
