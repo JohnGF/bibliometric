@@ -1,0 +1,13 @@
+source,destination,authors,year
+paper_A,dest_1,Smith J,2020
+paper_A,dest_2,Jones M,2021
+paper_B,dest_1,Smith J,2020
+paper_B,dest_2,Jones M,2021
+paper_B,dest_3,Taylor R,2022
+paper_C,dest_1,Smith J,2020
+paper_C,dest_3,Taylor R,2022
+paper_D,dest_2,Jones M,2021
+paper_D,dest_3,Taylor R,2022
+paper_E,dest_1,Smith J,2020
+paper_E,dest_2,Jones M,2021
+paper_E,dest_3,Taylor R,2022

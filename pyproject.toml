@@ -1,0 +1,36 @@
+[project]
+name = "bibliometric-pipeline"
+version = "0.1.0"
+description = "Modular pipeline for multidisciplinary bibliometric research."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "bertopic>=0.16.0",
+  "networkx>=3.0",
+  "python-louvain>=0.16",
+  "pandas>=2.0.0",
+  "fastapi>=0.110.0",
+  "uvicorn>=0.27.0",
+  "python-multipart>=0.0.9",
+  "pydantic>=2.0.0",
+  "polars>=0.20.0",
+  "pycountry>=22.0.0",
+  "matplotlib>=3.8.0",
+  "seaborn>=0.13.0",
+  "altair>=5.0.0",
+  "openpyxl>=3.1.0",
+  "scikit-learn>=1.3.0",
+  "numpy>=1.24.0",
+  "httpx>=0.27.0",
+  "pytest>=8.0.0",
+  "pytest-mock>=3.12.0",
+]
+
+[project.scripts]
+biblio-pipeline = "src.pipeline:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
