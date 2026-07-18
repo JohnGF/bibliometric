@@ -137,5 +137,54 @@ class UnifiedCollector:
         deduplicated_df = pd.DataFrame(deduplicated_rows)
         deduplicated_df = deduplicated_df.drop(columns=["normalized_doi", "normalized_title", "group_id"])
         
+        # Cross-Source DOI Enrichment
+        self._enrich_missing_metadata(deduplicated_df)
+
         logger.info(f"Unified collection complete. Total unique papers: {len(deduplicated_df)}")
         return deduplicated_df.reset_index(drop=True)
+
+    def _enrich_missing_metadata(self, df: pd.DataFrame):
+        """Fetches missing Abstract or Author Keywords by querying OpenAlex via DOI."""
+        if df.empty or "openalex" not in self.collectors:
+            return
+
+        oa_collector = self.collectors["openalex"]
+        enriched_count = 0
+
+        for idx, row in df.iterrows():
+            doi = row.get("DOI")
+            has_abstract = not pd.isna(row.get("Abstract")) and str(row.get("Abstract")).strip()
+            has_keywords = not pd.isna(row.get("Author Keywords")) and str(row.get("Author Keywords")).strip()
+
+            if doi and (not has_abstract or not has_keywords):
+                # Clean DOI
+                clean_doi = str(doi).strip().lower()
+                for prefix in ["https://doi.org/", "http://doi.org/", "doi.org/"]:
+                    if clean_doi.startswith(prefix):
+                        clean_doi = clean_doi[len(prefix):]
+
+                try:
+                    oa_data = oa_collector.fetch_by_doi(clean_doi)
+                    if oa_data:
+                        changed = False
+
+                        if not has_abstract and oa_data.get("abstract_inverted_index"):
+                            abstract = oa_collector._reconstruct_abstract(oa_data["abstract_inverted_index"])
+                            if abstract:
+                                df.at[idx, "Abstract"] = abstract
+                                changed = True
+
+                        if not has_keywords and oa_data.get("keywords"):
+                            keywords = [k.get("display_name", "") for k in oa_data.get("keywords", [])]
+                            keywords_str = "; ".join(filter(None, keywords))
+                            if keywords_str:
+                                df.at[idx, "Author Keywords"] = keywords_str
+                                changed = True
+
+                        if changed:
+                            enriched_count += 1
+                except Exception as e:
+                    logger.debug(f"Failed to enrich DOI {clean_doi}: {e}")
+
+        if enriched_count > 0:
+            logger.info(f"Enriched {enriched_count} papers with missing metadata via OpenAlex DOI lookup.")

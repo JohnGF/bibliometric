@@ -131,6 +131,47 @@ class BERTopicPipeline:
             return self.topic_model.get_topic_info()
         return None
 
+    def get_topics_over_time(self, docs: List[str], timestamps: List[int]) -> pd.DataFrame:
+        """Leverages BERTopic's topics_over_time to analyze how topics evolve."""
+        if not self.topic_model:
+            return pd.DataFrame()
+        try:
+            topics_over_time = self.topic_model.topics_over_time(docs, timestamps)
+            return topics_over_time
+        except Exception as e:
+            logging.error(f"Failed to generate topics over time: {e}")
+            return pd.DataFrame()
+
+    def get_topic_keyword_matrix(self, df: pl.DataFrame, docs_col: str, keyword_col: str = "standardized_word") -> pd.DataFrame:
+        """
+        Creates a correlation matrix mapping author keywords to BERTopic clusters.
+        Assumes `df` is the output of `preprocess_keywords` and has a `Topic` column
+        assigned from the BERTopic predictions.
+        """
+        if not self.topic_model or "Topic" not in df.columns:
+            return pd.DataFrame()
+
+        try:
+            # We want a crosstab/pivot of Topic vs Keyword
+            pandas_df = df.to_pandas()
+            # Filter out outlier topic
+            pandas_df = pandas_df[pandas_df["Topic"] != -1]
+            if pandas_df.empty:
+                return pd.DataFrame()
+
+            # Group by Topic and Keyword, count occurrences
+            matrix = pd.crosstab(pandas_df["Topic"], pandas_df[keyword_col])
+
+            # Map topic IDs to Topic Names for better readability
+            topic_info = self.topic_model.get_topic_info()
+            topic_name_map = dict(zip(topic_info['Topic'], topic_info['Name']))
+
+            matrix.index = matrix.index.map(lambda x: topic_name_map.get(x, f"Topic {x}"))
+            return matrix
+        except Exception as e:
+            logging.error(f"Failed to generate topic-keyword correlation: {e}")
+            return pd.DataFrame()
+
     def get_research_lines(self, nr_clusters: int = 5) -> pd.DataFrame:
         """Groups topics into broader 'Research Lines' using hierarchical clustering."""
         if not self.topic_model or len(self.topic_model.get_topic_info()) < 2:
