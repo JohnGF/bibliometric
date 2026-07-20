@@ -9,8 +9,13 @@ from src.core.collectors.pubmed import PubMedCollector
 from src.core.collectors.elsevier import ElsevierCollector
 from src.core.collectors.wos import WebOfScienceCollector
 from src.core.collectors.ieee import IEEECollector
+from src.core.collectors.arxiv import ArXivCollector
+from src.core.collectors.biorxiv import BioRxivCollector
 
 logger = logging.getLogger(__name__)
+
+PEER_REVIEWED_SOURCES = ["openalex", "semantic_scholar", "crossref", "pubmed", "scopus", "web_of_science", "ieee"]
+PREPRINT_SOURCES = ["arxiv", "biorxiv"]
 
 class UnifiedCollector:
     def __init__(self, config: Optional[Dict] = None):
@@ -35,13 +40,24 @@ class UnifiedCollector:
             "scopus": ElsevierCollector(api_key=scopus_key, inst_token=scopus_token),
             "web_of_science": WebOfScienceCollector(api_key=wos_key),
             "ieee": IEEECollector(api_key=ieee_key, email=oa_email),
+            "arxiv": ArXivCollector(),
+            "biorxiv": BioRxivCollector(email=oa_email),
         }
 
     def fetch_all(self, query: str, limit_per_source: int = 100, sources: Optional[List[str]] = None, 
-                  start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
-        """Fetches and merges data from multiple sources."""
+                  start_year: Optional[int] = None, end_year: Optional[int] = None,
+                  include_preprints: Optional[bool] = None) -> pd.DataFrame:
+        """Fetches and merges data from multiple sources.
+        
+        preprints are excluded by default unless include_preprints=True or --include-preprints is passed.
+        """
         all_dfs = []
-        target_sources = sources or list(self.collectors.keys())
+        allow_preprints = include_preprints if include_preprints is not None else self.config.get("include_preprints", False)
+        
+        if sources:
+            target_sources = sources
+        else:
+            target_sources = PEER_REVIEWED_SOURCES + (PREPRINT_SOURCES if allow_preprints else [])
 
         for source in target_sources:
             if source in self.collectors:

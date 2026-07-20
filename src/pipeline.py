@@ -232,11 +232,12 @@ def main():
     parser.add_argument("--scopus-inst-token", type=str, help="Institutional Token for Scopus (optional)")
     parser.add_argument("--wos-api-key", type=str, help="API Key for Web of Science")
     
-    # Paper Screening Options
+    # Paper Screening & Source Options
     parser.add_argument("--screen-embeddings", action="store_true", help="Enable Option 1: Embedding semantic relevance filter")
     parser.add_argument("--embedding-threshold", type=float, default=0.35, help="Similarity threshold for embedding filter (default: 0.35)")
     parser.add_argument("--screen-llm", action="store_true", help="Enable Option 2: LLM zero-shot classification & noise paradigm tagging")
     parser.add_argument("--llm-model", type=str, default="llama3.2:3b", help="Model name for Ollama LLM screening (default: llama3.2:3b)")
+    parser.add_argument("--include-preprints", action="store_true", help="Include preprints from arXiv and bioRxiv (disabled by default for peer-reviewed only)")
 
     args = parser.parse_args()
     
@@ -260,6 +261,7 @@ def main():
     config["embedding_threshold"] = args.embedding_threshold
     config["screen_llm"] = args.screen_llm
     config["llm_model"] = args.llm_model
+    config["include_preprints"] = args.include_preprints
 
     pipeline = BibliometricPipeline(output_dir=args.output, config=config)
 
