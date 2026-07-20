@@ -23,9 +23,12 @@ class IEEECollector:
     def fetch_papers(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
         """Fetches IEEE papers matching query and year range."""
         if self.api_key:
-            return self._fetch_official_api(query, limit, start_year, end_year)
-        else:
-            return self._fetch_via_openalex_ieee(query, limit, start_year, end_year)
+            df = self._fetch_official_api(query, limit, start_year, end_year)
+            if not df.empty:
+                return df
+            logger.warning("IEEE Official API returned empty or failed. Falling back to OpenAlex IEEE Publisher Index...")
+
+        return self._fetch_via_openalex_ieee(query, limit, start_year, end_year)
 
     def _fetch_official_api(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
         logger.info(f"Fetching IEEE papers via Official API Key (limit={limit})...")
