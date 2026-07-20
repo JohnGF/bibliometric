@@ -1,0 +1,5 @@
+(EEG OR Electroencephalography OR "Brainwave Monitoring" OR "Cerebral Electrophysiology" OR "Neurophysiological Recording" OR "Electroencephalographic Recording" OR "Brainwave Activity Measurement" OR "Cranial Electroencephalography")
+AND
+(artifact OR artefact OR noise OR interference OR contamination OR distortion OR artifact-related OR EMG OR "eye blink" OR motion OR physiological OR non-physiological OR denoising OR filtering OR reduction OR removal OR attenuation OR suppression OR elimination OR correction OR enhancement OR mitigation OR cleaning OR separation OR rejection)
+AND
+(impedance OR accuracy OR "signal quality" OR mismatch OR fidelity OR SNR OR improvement OR electrodes OR contact OR "machine learning" OR AI OR "deep learning" OR transform OR ICA OR PCA OR "source separation" OR "adaptive filtering" OR "real-time" OR hybrid OR Bayesian OR neural OR preprocessing)

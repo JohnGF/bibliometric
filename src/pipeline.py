@@ -220,6 +220,7 @@ def main():
     parser = argparse.ArgumentParser(description="Bibliometric Research Pipeline CLI")
     parser.add_argument("--file", type=str, help="Path to local CSV/Parquet file")
     parser.add_argument("--query", type=str, help="Search query for autonomous collection")
+    parser.add_argument("--query-file", type=str, help="Path to text file containing search query")
     parser.add_argument("--limit", type=int, default=100, help="Limit per source for collection (set to 0 for unlimited / fetch all matching papers)")
     parser.add_argument("--start-year", type=int, help="Start year for collection")
     parser.add_argument("--end-year", type=int, help="End year for collection")
@@ -240,6 +241,12 @@ def main():
     parser.add_argument("--include-preprints", action="store_true", help="Include preprints from arXiv and bioRxiv (disabled by default for peer-reviewed only)")
 
     args = parser.parse_args()
+
+    active_query = args.query
+    if args.query_file and os.path.exists(args.query_file):
+        with open(args.query_file, "r", encoding="utf-8") as qf:
+            lines = [l.strip() for l in qf if l.strip() and not l.strip().startswith("#")]
+            active_query = " ".join(lines)
     
     config = {}
     if args.openalex_email:
@@ -265,8 +272,8 @@ def main():
 
     pipeline = BibliometricPipeline(output_dir=args.output, config=config)
 
-    if args.query:
-        pipeline.run_with_query(args.query, limit=args.limit, start_year=args.start_year, end_year=args.end_year)
+    if active_query:
+        pipeline.run_with_query(active_query, limit=args.limit, start_year=args.start_year, end_year=args.end_year)
     elif args.file:
         pipeline.run(args.file)
     else:
