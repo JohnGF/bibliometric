@@ -77,7 +77,22 @@ def validate_all_keys():
     else:
         print("[INFO] Elsevier Scopus: No API Key configured.")
 
-    # 4. Semantic Scholar
+    # 4. IEEE Xplore
+    ieee_key = os.environ.get("IEEE_API_KEY")
+    if ieee_key:
+        url = f"https://ieeexploreapi.ieee.org/api/v1/search/articles?apikey={ieee_key}&querytext=eeg&max_records=1&format=json"
+        try:
+            r = httpx.get(url, timeout=10.0)
+            if r.status_code == 200:
+                print(f"[SUCCESS] IEEE Xplore (Key: {ieee_key[:6]}...) -> HTTP 200 OK")
+            else:
+                print(f"[WARNING] IEEE Xplore HTTP {r.status_code}: {r.text[:100]}")
+        except Exception as e:
+            print(f"[FAILED] IEEE Xplore check error: {e}")
+    else:
+        print("[SUCCESS] IEEE Xplore -> Enabled via OpenAlex IEEE Publisher Index (No API key required).")
+
+    # 5. Semantic Scholar
     if ss_key:
         url = "https://api.semanticscholar.org/graph/v1/paper/search?query=eeg&limit=1"
         try:

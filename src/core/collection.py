@@ -8,6 +8,7 @@ from src.core.collectors.crossref import CrossrefCollector
 from src.core.collectors.pubmed import PubMedCollector
 from src.core.collectors.elsevier import ElsevierCollector
 from src.core.collectors.wos import WebOfScienceCollector
+from src.core.collectors.ieee import IEEECollector
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class UnifiedCollector:
         scopus_key = self.config.get("scopus_api_key") or os.environ.get("SCOPUS_API_KEY")
         scopus_token = self.config.get("scopus_inst_token") or os.environ.get("SCOPUS_INST_TOKEN")
         wos_key = self.config.get("wos_api_key") or os.environ.get("WOS_API_KEY")
+        ieee_key = self.config.get("ieee_api_key") or os.environ.get("IEEE_API_KEY")
         
         self.collectors = {
             "openalex": OpenAlexCollector(email=oa_email),
@@ -32,6 +34,7 @@ class UnifiedCollector:
             "pubmed": PubMedCollector(api_key=pm_key),
             "scopus": ElsevierCollector(api_key=scopus_key, inst_token=scopus_token),
             "web_of_science": WebOfScienceCollector(api_key=wos_key),
+            "ieee": IEEECollector(api_key=ieee_key, email=oa_email),
         }
 
     def fetch_all(self, query: str, limit_per_source: int = 100, sources: Optional[List[str]] = None, 
