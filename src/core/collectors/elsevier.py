@@ -23,50 +23,55 @@ class ElsevierCollector:
             logger.warning("Elsevier Scopus API key not provided. Skipping Scopus search.")
             return pd.DataFrame()
 
+        years = range(start_year or 2015, (end_year or 2026) + 1) if (start_year or end_year) else [None]
         all_results = []
-        start = 0
-        effective_limit = 5000 if (limit is None or limit <= 0) else limit
-        count = min(effective_limit, 25)
+        is_unlimited = (limit is None or limit <= 0)
 
-        scopus_query = f"TITLE-ABS-KEY({query})"
-        if start_year and end_year:
-            scopus_query += f" AND PUBYEAR AFT {start_year - 1} AND PUBYEAR BEF {end_year + 1}"
-        elif start_year:
-            scopus_query += f" AND PUBYEAR AFT {start_year - 1}"
-        elif end_year:
-            scopus_query += f" AND PUBYEAR BEF {end_year + 1}"
+        for yr in years:
+            scopus_query = f"TITLE-ABS-KEY({query})"
+            if yr is not None:
+                scopus_query += f" AND PUBYEAR = {yr}"
 
-        while start < effective_limit:
-            current_count = min(count, effective_limit - start)
-            params = {
-                "query": scopus_query,
-                "count": current_count,
-                "start": start,
-                "view": "STANDARD"
-            }
+            start = 0
+            count = 25
+            logger.info(f"Fetching Scopus papers{' for year ' + str(yr) if yr else ''}...")
 
-            logger.info(f"Fetching Scopus papers (start={start}, count={current_count})")
-            try:
-                response = httpx.get(self.BASE_URL, params=params, headers=self.headers, timeout=30.0)
-                response.raise_for_status()
-                data = response.json()
-                results = data.get("search-results", {}).get("entry", [])
-                
-                if results and "error" in results[0]:
-                    logger.error(f"Scopus API returned error: {results[0].get('error')}")
-                    break
+            while True:
+                params = {
+                    "query": scopus_query,
+                    "count": count,
+                    "start": start,
+                    "view": "STANDARD"
+                }
+
+                try:
+                    response = httpx.get(self.BASE_URL, params=params, headers=self.headers, timeout=30.0)
+                    response.raise_for_status()
+                    data = response.json()
+                    results = data.get("search-results", {}).get("entry", [])
                     
-                if not results:
-                    break
+                    if results and "error" in results[0]:
+                        logger.error(f"Scopus API returned error: {results[0].get('error')}")
+                        break
+                        
+                    if not results:
+                        break
+                        
+                    all_results.extend(results)
+                    start += len(results)
                     
-                all_results.extend(results)
-                start += len(results)
-                if len(results) < current_count:
+                    if not is_unlimited and len(all_results) >= limit:
+                        break
+                    if len(results) < count or start >= 5000:
+                        break
+                except Exception as e:
+                    logger.error(f"Error fetching Scopus papers: {e}")
                     break
-            except Exception as e:
-                logger.error(f"Error fetching from Scopus: {e}")
+
+            if not is_unlimited and len(all_results) >= limit:
                 break
 
+        logger.info(f"Scopus fetch complete. Total papers retrieved: {len(all_results)}")
         return self._to_dataframe(all_results)
 
     def _to_dataframe(self, results: List[Dict]) -> pd.DataFrame:
