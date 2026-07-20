@@ -8,6 +8,7 @@ from src.core.viz import Visualization
 from src.core.collection import UnifiedCollector
 from src.core.countries import CountryAnalysis
 from src.core.citations import CitationsAnalysis
+from src.core.screening import PaperScreener
 import os
 import logging
 import argparse
@@ -24,6 +25,23 @@ class BibliometricPipeline:
         self.collector = UnifiedCollector(config=config)
         self.country_analyzer = CountryAnalysis()
         self.citation_analyzer = CitationsAnalysis()
+        
+        # Screening configuration (Option 1: Embeddings, Option 2: LLM)
+        config = config or {}
+        use_screen_emb = config.get("screen_embeddings", False)
+        use_screen_llm = config.get("screen_llm", False)
+        emb_threshold = config.get("embedding_threshold", 0.35)
+        llm_model = config.get("llm_model", "llama3.2:3b")
+        
+        if use_screen_emb or use_screen_llm:
+            self.screener = PaperScreener(
+                use_embedding_filter=use_screen_emb,
+                embedding_threshold=emb_threshold,
+                use_llm_categorization=use_screen_llm,
+                llm_model=llm_model
+            )
+        else:
+            self.screener = None
 
     def run_with_query(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None):
         """Fetches data and then runs the pipeline."""
@@ -34,10 +52,19 @@ class BibliometricPipeline:
             logging.error("No data found for the given query.")
             return
  
+        if self.screener:
+            logging.info("Applying automated paper screening...")
+            df_pd = self.screener.screen(df_pd)
+            if df_pd.empty:
+                logging.error("No papers retained after screening.")
+                return
+
         # Save collected data
         data_dir = "data"
         os.makedirs(data_dir, exist_ok=True)
-        safe_query = query.replace(' ', '_').replace('/', '_')
+        import re
+        safe_query = re.sub(r'[^a-zA-Z0-9_\-]', '_', query)
+        safe_query = re.sub(r'_+', '_', safe_query)[:50].strip('_')
         papers_path = os.path.join(data_dir, f"collected_{safe_query}.csv")
         df_pd.to_csv(papers_path, index=False)
         logging.info(f"Data saved to {papers_path}")
@@ -48,6 +75,13 @@ class BibliometricPipeline:
         logging.info(f"Starting pipeline for {papers_path}")
         # 1. Ingestion & Validation
         df_pd = load_data(papers_path)
+        
+        if self.screener:
+            logging.info("Applying automated paper screening on input file...")
+            df_pd = self.screener.screen(df_pd)
+            if df_pd.empty:
+                logging.error("No papers retained after screening.")
+                return
         
         # Parse runtime configurations
         config = config or {}
@@ -175,7 +209,7 @@ def main():
     parser = argparse.ArgumentParser(description="Bibliometric Research Pipeline CLI")
     parser.add_argument("--file", type=str, help="Path to local CSV/Parquet file")
     parser.add_argument("--query", type=str, help="Search query for autonomous collection")
-    parser.add_argument("--limit", type=int, default=100, help="Limit per source for autonomous collection")
+    parser.add_argument("--limit", type=int, default=100, help="Limit per source for collection (set to 0 for unlimited / fetch all matching papers)")
     parser.add_argument("--start-year", type=int, help="Start year for collection")
     parser.add_argument("--end-year", type=int, help="End year for collection")
     parser.add_argument("--output", type=str, default="pipeline_results", help="Output directory")
@@ -186,6 +220,12 @@ def main():
     parser.add_argument("--scopus-api-key", type=str, help="API Key for Elsevier Scopus")
     parser.add_argument("--scopus-inst-token", type=str, help="Institutional Token for Scopus (optional)")
     parser.add_argument("--wos-api-key", type=str, help="API Key for Web of Science")
+    
+    # Paper Screening Options
+    parser.add_argument("--screen-embeddings", action="store_true", help="Enable Option 1: Embedding semantic relevance filter")
+    parser.add_argument("--embedding-threshold", type=float, default=0.35, help="Similarity threshold for embedding filter (default: 0.35)")
+    parser.add_argument("--screen-llm", action="store_true", help="Enable Option 2: LLM zero-shot classification & noise paradigm tagging")
+    parser.add_argument("--llm-model", type=str, default="llama3.2:3b", help="Model name for Ollama LLM screening (default: llama3.2:3b)")
 
     args = parser.parse_args()
     
@@ -204,6 +244,11 @@ def main():
         config["scopus_inst_token"] = args.scopus_inst_token
     if args.wos_api_key:
         config["wos_api_key"] = args.wos_api_key
+
+    config["screen_embeddings"] = args.screen_embeddings
+    config["embedding_threshold"] = args.embedding_threshold
+    config["screen_llm"] = args.screen_llm
+    config["llm_model"] = args.llm_model
 
     pipeline = BibliometricPipeline(output_dir=args.output, config=config)
 

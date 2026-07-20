@@ -172,23 +172,15 @@ class BERTopicPipeline:
             logging.error(f"Failed to generate topic-keyword correlation: {e}")
             return pd.DataFrame()
 
-    def get_research_lines(self, nr_clusters: int = 5) -> pd.DataFrame:
+    def get_research_lines(self, docs: Optional[List[str]] = None, nr_clusters: int = 5) -> pd.DataFrame:
         """Groups topics into broader 'Research Lines' using hierarchical clustering."""
         if not self.topic_model or len(self.topic_model.get_topic_info()) < 2:
             return pd.DataFrame()
 
         try:
-            # Hierarchical clustering of topics
-            hierarchical_topics = self.topic_model.hierarchical_topics(
-                docs=self.topic_model.docs, 
-                nr_clusters=nr_clusters
-            )
-            
             # Get basic topic info
             topic_info = self.topic_model.get_topic_info()
             
-            # Map topics to their high-level research line labels
-            # BERTopic provides labels for merged topics in the hierarchical tree
             research_lines = []
             for _, row in topic_info.iterrows():
                 topic_id = row['Topic']
@@ -202,8 +194,6 @@ class BERTopicPipeline:
                     "topic_label": row.get('Name', f"Topic {topic_id}"),
                     "keywords": ", ".join(words),
                     "count": row.get('Count', 0),
-                    # We can use the hierarchical labels if we want more depth, 
-                    # but for now, we'll return the refined topic list as the base for 'Research Lines'
                 })
                 
             return pd.DataFrame(research_lines)

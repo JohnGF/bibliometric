@@ -7,6 +7,9 @@ import time
 def run():
     print("=== Initializing Bibliometric Pipeline (Cross-Platform) ===")
     
+    # Set copy mode for uv since workspace is on an external drive partition
+    os.environ["UV_LINK_MODE"] = "copy"
+    
     # Check if 'uv' is available
     use_uv = False
     try:

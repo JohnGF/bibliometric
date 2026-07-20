@@ -14,12 +14,16 @@ class OpenAlexCollector:
         if email:
             self.headers["mailto"] = email
 
-    def fetch_papers(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
-        """Fetches papers from OpenAlex based on a search query and year range with pagination."""
+    def fetch_papers(self, query: str, limit: Optional[int] = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
+        """Fetches papers from OpenAlex using cursor-based deep pagination.
+        
+        Set limit=None or limit=0 for unlimited fetching of all matching papers.
+        """
         all_results = []
-        per_page = min(limit, 200)
-        page = 1
+        per_page = 200  # OpenAlex max items per request
+        cursor = "*"
         fetched = 0
+        is_unlimited = (limit is None or limit <= 0)
         
         filters = []
         if start_year:
@@ -27,32 +31,43 @@ class OpenAlexCollector:
         if end_year:
             filters.append(f"to_publication_date:{end_year}-12-31")
             
-        while fetched < limit:
-            current_limit = min(per_page, limit - fetched)
+        while True:
+            if not is_unlimited and fetched >= limit:
+                break
+                
+            current_per_page = per_page if is_unlimited else min(per_page, limit - fetched)
             params = {
                 "search": query,
-                "per_page": current_limit,
-                "page": page,
+                "per_page": current_per_page,
+                "cursor": cursor,
                 "select": "title,abstract_inverted_index,authorships,publication_year,doi,ids,keywords,concepts,cited_by_count,referenced_works",
             }
             if filters:
                 params["filter"] = ",".join(filters)
                 
-            logger.info(f"Fetching page {page} from OpenAlex for query: {query} (Limit page: {current_limit})")
+            logger.info(f"Fetching batch from OpenAlex (Fetched: {fetched}{'/' + str(limit) if not is_unlimited else ''}, Cursor: {cursor[:10]}...)")
             try:
                 data = self._make_request(params)
                 results = data.get("results", [])
+                meta = data.get("meta", {})
+                next_cursor = meta.get("next_cursor")
+
                 if not results:
                     break
+                    
                 all_results.extend(results)
                 fetched += len(results)
-                if len(results) < current_limit:
+
+                # Stop if no next cursor or no remaining results
+                if not next_cursor or next_cursor == cursor or len(results) < current_per_page:
                     break
-                page += 1
+                    
+                cursor = next_cursor
             except Exception as e:
-                logger.error(f"Error fetching page {page} from OpenAlex: {e}")
+                logger.error(f"Error fetching from OpenAlex: {e}")
                 break
                 
+        logger.info(f"OpenAlex fetch complete. Total papers retrieved: {len(all_results)}")
         return self._to_dataframe(all_results)
 
     def fetch_by_doi(self, doi: str) -> Optional[Dict]:
