@@ -25,7 +25,8 @@ class ElsevierCollector:
 
         all_results = []
         start = 0
-        count = min(limit, 25)
+        effective_limit = 5000 if (limit is None or limit <= 0) else limit
+        count = min(effective_limit, 25)
 
         scopus_query = f"TITLE-ABS-KEY({query})"
         if start_year and end_year:
@@ -35,8 +36,8 @@ class ElsevierCollector:
         elif end_year:
             scopus_query += f" AND PUBYEAR BEF {end_year + 1}"
 
-        while start < limit:
-            current_count = min(count, limit - start)
+        while start < effective_limit:
+            current_count = min(count, effective_limit - start)
             params = {
                 "query": scopus_query,
                 "count": current_count,

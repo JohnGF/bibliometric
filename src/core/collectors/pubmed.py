@@ -24,16 +24,18 @@ class PubMedCollector:
         elif end_year:
             term += f" AND 1800:{end_year}[DP]"
 
+        effective_limit = 10000 if (limit is None or limit <= 0) else limit
+
         search_params = {
             "db": "pubmed",
             "term": term,
             "retmode": "json",
-            "retmax": limit,
+            "retmax": effective_limit,
         }
         if self.api_key:
             search_params["api_key"] = self.api_key
 
-        logger.info(f"Searching PubMed for term: {term} (limit={limit})")
+        logger.info(f"Searching PubMed for term: {term} (limit={effective_limit})")
         try:
             response = httpx.get(self.SEARCH_URL, params=search_params, timeout=30.0)
             response.raise_for_status()
