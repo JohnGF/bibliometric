@@ -31,10 +31,23 @@ class OpenAlexCollector:
         if end_year:
             filters.append(f"to_publication_date:{end_year}-12-31")
             
-        import re
-        clean_query = re.sub(r'[\(\)\*\"]', ' ', query)
-        clean_query = re.sub(r'\b(AND|OR|NOT)\b', ' ', clean_query, flags=re.IGNORECASE)
-        clean_query = re.sub(r'\s+', ' ', clean_query).strip()
+        has_boolean = any(w in query.upper() for w in [" AND ", " OR ", " NOT "]) or '"' in query
+        
+        filters = []
+        if start_year:
+            filters.append(f"from_publication_date:{start_year}-01-01")
+        if end_year:
+            filters.append(f"to_publication_date:{end_year}-12-31")
+            
+        if has_boolean:
+            filters.append(f"title_and_abstract.search:{query}")
+            search_param = None
+        else:
+            import re
+            clean_query = re.sub(r'[\(\)\*\"]', ' ', query)
+            clean_query = re.sub(r'\b(AND|OR|NOT)\b', ' ', clean_query, flags=re.IGNORECASE)
+            clean_query = re.sub(r'\s+', ' ', clean_query).strip()
+            search_param = clean_query
 
         while True:
             if not is_unlimited and fetched >= limit:
@@ -42,11 +55,12 @@ class OpenAlexCollector:
                 
             current_per_page = per_page if is_unlimited else min(per_page, limit - fetched)
             params = {
-                "search": clean_query,
                 "per_page": current_per_page,
                 "cursor": cursor,
                 "select": "title,abstract_inverted_index,authorships,publication_year,doi,ids,keywords,concepts,cited_by_count,referenced_works",
             }
+            if search_param:
+                params["search"] = search_param
             if filters:
                 params["filter"] = ",".join(filters)
                 

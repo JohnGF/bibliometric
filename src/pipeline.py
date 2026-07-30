@@ -145,11 +145,28 @@ class BibliometricPipeline:
         df = df.with_columns(pl.col("Year").cast(pl.Int64))
         
         # 2. Basic Visualization (Growth)
-        logging.info("Generating yearly growth charts...")
-        self.viz.plot_yearly_growth(df, save_path=os.path.join(self.output_dir, "yearly_growth.pdf"))
+        stages = config.get("stages", None)
+        skip_nlp = config.get("skip_nlp", False)
+        skip_network = config.get("skip_network", False)
+        skip_country = config.get("skip_country", False)
+        skip_cagr = config.get("skip_cagr", False)
+        skip_percolation = config.get("skip_percolation", False)
+        
+        def should_run(stage_name: str, skip_flag: bool) -> bool:
+            if skip_flag:
+                return False
+            if stages is not None:
+                return stage_name in stages
+            return True
+
+        if should_run("growth", False):
+            logging.info("Generating yearly growth charts and 2026 projections...")
+            growth_df = self.viz.plot_yearly_growth(df, save_path=os.path.join(self.output_dir, "yearly_growth.pdf"))
+            if growth_df is not None and not growth_df.empty:
+                growth_df.to_csv(os.path.join(self.output_dir, "yearly_growth.csv"), index=False)
         
         # 3. Country Evolution Analysis
-        if "Affiliations" in df_pd.columns:
+        if should_run("country", skip_country) and "Affiliations" in df_pd.columns:
             logging.info("Running country evolution analysis...")
             exploded_pub, country_ev = self.country_analyzer.process_countries(df)
             if not country_ev.empty:
@@ -157,7 +174,7 @@ class BibliometricPipeline:
                 self.viz.plot_country_evolution(country_ev, top_n=top_n_countries, save_path=os.path.join(self.output_dir, "country_evolution.pdf"))
 
         # 4. Keyword CAGR Analysis
-        if "Author Keywords" in df_pd.columns:
+        if should_run("cagr", skip_cagr) and "Author Keywords" in df_pd.columns:
             logging.info("Running keyword CAGR analysis...")
             try:
                 kw_df = self.nlp.preprocess_keywords(df, column="Author Keywords")
@@ -172,48 +189,97 @@ class BibliometricPipeline:
                 logging.error(f"Failed to run keyword CAGR analysis: {e}")
 
         # 5. NLP (Topics)
-        logging.info("Running BERTopic modeling...")
-        docs = df["Abstract"].drop_nulls().to_list()
-        # BERTopic requires at least 10 documents to cluster successfully
-        if len(docs) >= 10:
-            topics, probs = self.nlp.fit_model(docs)
-            topic_info = self.nlp.get_topics()
-            if topic_info is not None:
-                topic_info.to_csv(os.path.join(self.output_dir, "topic_info.csv"), index=False)
-                self.viz.plot_topic_distribution(topic_info, save_path=os.path.join(self.output_dir, "topic_word_scores.pdf"))
-            
-            # Generate and save high-level Research Lines
-            logging.info("Generating high-level Research Lines...")
-            research_lines = self.nlp.get_research_lines(nr_clusters=5)
-            if not research_lines.empty:
-                research_lines.to_csv(os.path.join(self.output_dir, "topic_research_lines.csv"), index=False)
+        if should_run("nlp", skip_nlp):
+            logging.info("Running BERTopic modeling...")
+            docs = df["Abstract"].drop_nulls().to_list()
+            # BERTopic requires at least 10 documents to cluster successfully
+            if len(docs) >= 10:
+                topics, probs = self.nlp.fit_model(docs)
+                topic_info = self.nlp.get_topics()
+                if topic_info is not None:
+                    topic_info.to_csv(os.path.join(self.output_dir, "topic_info.csv"), index=False)
+                    self.viz.plot_topic_distribution(topic_info, save_path=os.path.join(self.output_dir, "topic_word_scores.pdf"))
+                
+                # Generate and save high-level Research Lines
+                logging.info("Generating high-level Research Lines...")
+                research_lines = self.nlp.get_research_lines(nr_clusters=5)
+                if not research_lines.empty:
+                    research_lines.to_csv(os.path.join(self.output_dir, "topic_research_lines.csv"), index=False)
+            else:
+                logging.warning(f"Too few abstracts ({len(docs)}) for topic modeling. Skipping BERTopic.")
         else:
-            logging.warning(f"Too few abstracts ({len(docs)}) for topic modeling. Skipping BERTopic.")
-            
+            logging.info("Skipping BERTopic modeling as requested.")
+
         # 6. Network Analysis (Co-authorship)
-        edges_df, node_meta = self.network.build_co_authorship_graph(df)
-        
-        # Ensure outputs are CSV compatible (convert to pandas if they are cudf/polars)
-        if hasattr(edges_df, "to_pandas"):
-            edges_df = edges_df.to_pandas()
-        if hasattr(node_meta, "to_pandas"):
-            node_meta = node_meta.to_pandas()
+        if should_run("network", skip_network):
+            logging.info("Building co-authorship network...")
+            edges_df, node_meta = self.network.build_co_authorship_graph(df)
+            
+            # Ensure outputs are CSV compatible (convert to pandas if they are cudf/polars)
+            if hasattr(edges_df, "to_pandas"):
+                edges_df = edges_df.to_pandas()
+            if hasattr(node_meta, "to_pandas"):
+                node_meta = node_meta.to_pandas()
 
-        # Apply min publications filter if specified in config
-        if min_pub > 1 and not node_meta.empty:
-            logging.info(f"Filtering co-authorship network with min_publications >= {min_pub}...")
-            node_meta = node_meta[node_meta['num_publications'] >= min_pub]
-            valid_vertices = set(node_meta['vertex'])
-            edges_df = edges_df[edges_df['source_id'].isin(valid_vertices) & edges_df['dest_id'].isin(valid_vertices)]
+            # Apply min publications filter if specified in config
+            if min_pub > 1 and not node_meta.empty:
+                logging.info(f"Filtering co-authorship network with min_publications >= {min_pub}...")
+                node_meta = node_meta[node_meta['num_publications'] >= min_pub]
+                valid_vertices = set(node_meta['vertex'])
+                edges_df = edges_df[edges_df['source_id'].isin(valid_vertices) & edges_df['dest_id'].isin(valid_vertices)]
 
-        edges_df.to_csv(os.path.join(self.output_dir, "network_edges.csv"), index=False)
-        node_meta.to_csv(os.path.join(self.output_dir, "network_nodes.csv"), index=False)
-        
-        # Renders the publication-ready co-authorship Network PDF graph
-        if not edges_df.empty and not node_meta.empty:
-            logging.info("Generating static co-authorship network PDF graph...")
-            self.viz.plot_network(edges_df, node_meta, save_path=os.path.join(self.output_dir, "network_graph.pdf"))
-        
+            edges_df.to_csv(os.path.join(self.output_dir, "network_edges.csv"), index=False)
+            node_meta.to_csv(os.path.join(self.output_dir, "network_nodes.csv"), index=False)
+            
+            # Renders the publication-ready co-authorship Network PDF graph
+            if not edges_df.empty and not node_meta.empty:
+                logging.info("Generating static co-authorship network PDF graph...")
+                top_per_comm = self.config.get("top_per_community", 1)
+                self.viz.plot_network(edges_df, node_meta, save_path=os.path.join(self.output_dir, "network_graph.pdf"), top_per_community=top_per_comm)
+
+        else:
+            logging.info("Skipping network analysis as requested.")
+
+        # 7. Percolation Analysis Stage
+        if should_run("percolation", skip_percolation):
+            logging.info("Running percolation threshold analysis stage...")
+            edges_for_perc = None
+            if 'edges_df' in locals() and not edges_df.empty:
+                edges_for_perc = edges_df
+            else:
+                edges_csv = os.path.join(self.output_dir, "network_edges.csv")
+                if os.path.exists(edges_csv):
+                    logging.info(f"Loading existing network edges from {edges_csv}...")
+                    edges_for_perc = pd.read_csv(edges_csv)
+                else:
+                    logging.info("Building co-authorship network for percolation analysis...")
+                    edges_for_perc, _ = self.network.build_co_authorship_graph(df)
+                    if hasattr(edges_for_perc, "to_pandas"):
+                        edges_for_perc = edges_for_perc.to_pandas()
+
+            if edges_for_perc is not None and not edges_for_perc.empty:
+                try:
+                    s_col = 'source' if 'source' in edges_for_perc.columns else 'source_id'
+                    d_col = 'destination' if 'destination' in edges_for_perc.columns else 'dest_id'
+                    w_col = 'weight' if 'weight' in edges_for_perc.columns else ('co_citation_count' if 'co_citation_count' in edges_for_perc.columns else edges_for_perc.columns[-1])
+                    
+                    percolation_df = self.citation_analyzer.perform_percolation_analysis(
+                        edges_for_perc, s_col, d_col, w_col
+                    )
+                    if not percolation_df.empty:
+                        percolation_df.to_csv(os.path.join(self.output_dir, "percolation_results.csv"), index=False)
+                        logging.info("Generating static percolation analysis PDF graph...")
+                        self.viz.plot_percolation(
+                            percolation_df, w_col,
+                            save_path=os.path.join(self.output_dir, "percolation_analysis.pdf")
+                        )
+                except Exception as e:
+                    logging.exception(f"Error during percolation analysis stage: {e}")
+            else:
+                logging.warning("No edge data available to run percolation analysis.")
+        else:
+            logging.info("Skipping percolation stage as requested.")
+
         logging.info(f"Pipeline complete. All results saved to {self.output_dir}")
 
 def main():
@@ -239,6 +305,16 @@ def main():
     parser.add_argument("--screen-llm", action="store_true", help="Enable Option 2: LLM zero-shot classification & noise paradigm tagging")
     parser.add_argument("--llm-model", type=str, default="llama3.2:3b", help="Model name for Ollama LLM screening (default: llama3.2:3b)")
     parser.add_argument("--include-preprints", action="store_true", help="Include preprints from arXiv and bioRxiv (disabled by default for peer-reviewed only)")
+
+    # Modular Stage Control Options
+    parser.add_argument("--top-per-community", type=int, default=1, help="Top N representative author leaders per community to show in static network graph (default: 1)")
+    parser.add_argument("--min-publications", type=int, default=1, help="Minimum publications threshold for network node inclusion (default: 1)")
+    parser.add_argument("--stages", type=str, help="Comma-separated list of stages to run (options: growth,country,cagr,nlp,network,percolation)")
+    parser.add_argument("--skip-nlp", action="store_true", help="Skip BERTopic modeling stage")
+    parser.add_argument("--skip-network", action="store_true", help="Skip co-authorship network stage")
+    parser.add_argument("--skip-cagr", action="store_true", help="Skip keyword CAGR stage")
+    parser.add_argument("--skip-country", action="store_true", help="Skip country evolution stage")
+    parser.add_argument("--skip-percolation", action="store_true", help="Skip percolation analysis stage")
 
     args = parser.parse_args()
 
@@ -270,12 +346,22 @@ def main():
     config["llm_model"] = args.llm_model
     config["include_preprints"] = args.include_preprints
 
+    if args.stages:
+        config["stages"] = [s.strip().lower() for s in args.stages.split(",")]
+    config["top_per_community"] = args.top_per_community
+    config["min_publications"] = args.min_publications
+    config["skip_nlp"] = args.skip_nlp
+    config["skip_network"] = args.skip_network
+    config["skip_cagr"] = args.skip_cagr
+    config["skip_country"] = args.skip_country
+    config["skip_percolation"] = args.skip_percolation
+
     pipeline = BibliometricPipeline(output_dir=args.output, config=config)
 
     if active_query:
         pipeline.run_with_query(active_query, limit=args.limit, start_year=args.start_year, end_year=args.end_year)
     elif args.file:
-        pipeline.run(args.file)
+        pipeline.run(args.file, config=config)
     else:
         parser.print_help()
 

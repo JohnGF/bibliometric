@@ -81,3 +81,5 @@ npm run dev
 - **Validation**: Always validate data using `PublicationSchema` before processing.
 - **GPU Safety**: Ensure RAPIDS libraries (`cudf`, `cugraph`) are only called within the container environment.
 - **Modularity**: Keep core analysis logic independent of the UI or CLI entrypoints.
+- **Formatting**: Do not use emojis in any responses, code comments, logs, or documentation.
+

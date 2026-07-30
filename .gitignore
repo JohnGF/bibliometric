@@ -1,44 +1,99 @@
-# Virtual Environment
+# ==========================================
+# Virtual Environments & Environment Config
+# ==========================================
 .venv/
+.venv*/
 venv/
 ENV/
+env/
 .env
+.env*.local
+*.env
 
-# Python Cache
+# ==========================================
+# Python Build & Cache Artifacts
+# ==========================================
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
 *.so
 *.c
-
-# Node.js
-node_modules/
-.next/
-out/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
 build/
 dist/
+
+# ==========================================
+# Node.js & Web Frontend
+# ==========================================
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+frontend/build/
+frontend/dist/
+.turbo/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-# Pipeline Dynamic Data & Results
-data/
-pipeline_results/
+# ==========================================
+# Pipeline Datasets & Dynamic Output Results
+# ==========================================
+data/*
+!data/.gitkeep
+pipeline_results*/
+pipeline_*_results/
 outputs/
+output/
 *.parquet
 *.log
+
+# Generated Media & Report Export Formats
 *.pdf
 *.png
+*.jpg
+*.jpeg
 *.svg
 *.html
 
-# Ignore notebook-generated outputs inside notebooks/
+# ==========================================
+# Jupyter Notebooks & Outputs
+# ==========================================
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
 notebooks/*.parquet
 notebooks/*.pdf
 notebooks/*.png
 notebooks/*.svg
 notebooks/*.html
 notebooks/*.txt
-notebooks/.ipynb_checkpoints/
 
+# ==========================================
+# IDE & System Files
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+Thumbs.db
+.antigravitycli/
+
+# ==========================================
+# Temporary & Scratch Files
+# ==========================================
+t
+tmp/
+temp/
+*.tmp
+*.bak

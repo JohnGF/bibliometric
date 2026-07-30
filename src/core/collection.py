@@ -9,12 +9,13 @@ from src.core.collectors.pubmed import PubMedCollector
 from src.core.collectors.elsevier import ElsevierCollector
 from src.core.collectors.wos import WebOfScienceCollector
 from src.core.collectors.ieee import IEEECollector
+from src.core.collectors.acm import ACMCollector
 from src.core.collectors.arxiv import ArXivCollector
 from src.core.collectors.biorxiv import BioRxivCollector
 
 logger = logging.getLogger(__name__)
 
-PEER_REVIEWED_SOURCES = ["openalex", "semantic_scholar", "crossref", "pubmed", "scopus", "web_of_science", "ieee"]
+PEER_REVIEWED_SOURCES = ["openalex", "semantic_scholar", "crossref", "pubmed", "scopus", "web_of_science", "ieee", "acm"]
 PREPRINT_SOURCES = ["arxiv", "biorxiv"]
 
 class UnifiedCollector:
@@ -40,6 +41,7 @@ class UnifiedCollector:
             "scopus": ElsevierCollector(api_key=scopus_key, inst_token=scopus_token),
             "web_of_science": WebOfScienceCollector(api_key=wos_key),
             "ieee": IEEECollector(api_key=ieee_key, email=oa_email),
+            "acm": ACMCollector(email=oa_email),
             "arxiv": ArXivCollector(),
             "biorxiv": BioRxivCollector(email=oa_email),
         }
@@ -57,7 +59,7 @@ class UnifiedCollector:
         if sources:
             target_sources = sources
         else:
-            target_sources = PEER_REVIEWED_SOURCES + (PREPRINT_SOURCES if allow_preprints else [])
+            target_sources = [s for s in self.collectors.keys() if allow_preprints or s not in PREPRINT_SOURCES]
 
         for source in target_sources:
             if source in self.collectors:
@@ -73,12 +75,19 @@ class UnifiedCollector:
             return pd.DataFrame()
 
         merged_df = pd.concat(all_dfs, ignore_index=True)
-        
+        return self.deduplicate_dataframe(merged_df)
+
+    def deduplicate_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Deduplicates and merges matching publication records using Union-Find on DOI and Title."""
+        if df.empty:
+            return pd.DataFrame()
+
+        merged_df = df.copy()
+
         # Normalize DOIs and Titles for grouping
         def normalize_doi(doi):
             if pd.isna(doi) or not isinstance(doi, str):
                 return ""
-            # Strip URL prefixes if present
             doi = doi.lower().strip()
             for prefix in ["https://doi.org/", "http://doi.org/", "doi.org/"]:
                 if doi.startswith(prefix):
@@ -88,7 +97,6 @@ class UnifiedCollector:
         def normalize_title(title):
             if pd.isna(title) or not isinstance(title, str):
                 return ""
-            # Keep only alphanumeric characters and convert to lowercase
             import re
             return re.sub(r'[^a-z0-9]', '', title.lower())
 
@@ -97,7 +105,6 @@ class UnifiedCollector:
 
         # Merge matching rows
         def merge_group(group: pd.DataFrame) -> pd.Series:
-            # Initialize merged row with the first row
             merged = group.iloc[0].copy()
             for idx in range(1, len(group)):
                 row = group.iloc[idx]
@@ -111,14 +118,11 @@ class UnifiedCollector:
                     if is_curr_empty and is_val_present:
                         merged[col] = val
                     elif col == "Cite Count" and is_val_present:
-                        # Keep max citation count
                         merged[col] = max(int(curr or 0), int(val or 0))
                     elif col == "Source" and is_val_present:
-                        # Collect all sources
                         if val not in str(curr):
                             merged[col] = f"{curr}, {val}"
                     elif col == "Author Keywords" and is_val_present and curr != val:
-                        # Combine keywords
                         kws = set(filter(None, [k.strip() for k in str(curr).split(";") if k.strip()]))
                         new_kws = [k.strip() for k in str(val).split(";") if k.strip()]
                         for kw in new_kws:
@@ -126,7 +130,6 @@ class UnifiedCollector:
                         merged[col] = "; ".join(sorted(kws))
             return merged
 
-        # Define Union-Find for transitive grouping
         n_rows = len(merged_df)
         parent = list(range(n_rows))
         
@@ -142,7 +145,6 @@ class UnifiedCollector:
             if root_i != root_j:
                 parent[root_i] = root_j
 
-        # Map normalized DOI/Title to first seen row index
         doi_to_idx = {}
         title_to_idx = {}
         
@@ -162,10 +164,8 @@ class UnifiedCollector:
                 else:
                     title_to_idx[title] = idx
                     
-        # Assign unique group IDs based on representatives
         merged_df["group_id"] = [find(i) for i in range(n_rows)]
         
-        # Group by group_id and merge each group
         deduplicated_rows = []
         for _, group in merged_df.groupby("group_id"):
             if len(group) == 1:
@@ -176,10 +176,9 @@ class UnifiedCollector:
         deduplicated_df = pd.DataFrame(deduplicated_rows)
         deduplicated_df = deduplicated_df.drop(columns=["normalized_doi", "normalized_title", "group_id"])
         
-        # Cross-Source DOI Enrichment
         self._enrich_missing_metadata(deduplicated_df)
 
-        logger.info(f"Unified collection complete. Total unique papers: {len(deduplicated_df)}")
+        logger.info(f"Deduplication complete. Total unique papers: {len(deduplicated_df)}")
         return deduplicated_df.reset_index(drop=True)
 
     def _enrich_missing_metadata(self, df: pd.DataFrame):

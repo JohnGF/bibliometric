@@ -54,6 +54,7 @@ export default function NetworkVisualizer({ apiBase, onClose }: NetworkVisualize
   // Filter States
   const [minCitations, setMinCitations] = useState(0);
   const [minPublications, setMinPublications] = useState(1);
+  const [leadersPerCommunity, setLeadersPerCommunity] = useState<number>(0);
   const [nodeSizing, setNodeSizing] = useState<"citations" | "publications" | "pagerank">("publications");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCommunity, setSelectedCommunity] = useState<number | null>(null);
@@ -69,6 +70,45 @@ export default function NetworkVisualizer({ apiBase, onClose }: NetworkVisualize
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [zoom, setZoom] = useState(1.0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [savedNotification, setSavedNotification] = useState(false);
+
+  // Load saved default visualizer settings from localStorage on initial render
+  useEffect(() => {
+    try {
+      const savedSettings = localStorage.getItem("biblio_viz_settings");
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        if (parsed.minCitations !== undefined) setMinCitations(parsed.minCitations);
+        if (parsed.minPublications !== undefined) setMinPublications(parsed.minPublications);
+        if (parsed.leadersPerCommunity !== undefined) setLeadersPerCommunity(parsed.leadersPerCommunity);
+        if (parsed.nodeSizing) setNodeSizing(parsed.nodeSizing);
+        if (parsed.repulsion !== undefined) setRepulsion(parsed.repulsion);
+        if (parsed.springStrength !== undefined) setSpringStrength(parsed.springStrength);
+        if (parsed.gravity !== undefined) setGravity(parsed.gravity);
+      }
+    } catch (e) {
+      console.warn("Could not load saved visualizer settings:", e);
+    }
+  }, []);
+
+  const saveAsDefaults = () => {
+    const settings = {
+      minCitations,
+      minPublications,
+      leadersPerCommunity,
+      nodeSizing,
+      repulsion,
+      springStrength,
+      gravity,
+    };
+    try {
+      localStorage.setItem("biblio_viz_settings", JSON.stringify(settings));
+      setSavedNotification(true);
+      setTimeout(() => setSavedNotification(false), 3000);
+    } catch (e) {
+      console.error("Failed to save visualizer settings:", e);
+    }
+  };
 
   // Ticks state to trigger React re-renders for the simulation
   const [tick, setTick] = useState(0);
@@ -332,13 +372,35 @@ export default function NetworkVisualizer({ apiBase, onClose }: NetworkVisualize
 
   // 3. Dynamic Filter Calculations
   const filteredNodes = useMemo(() => {
-    return nodes.filter(node => {
+    let result = nodes.filter(node => {
       if (node.citations < minCitations) return false;
       if (node.publications < minPublications) return false;
       if (selectedCommunity !== null && node.community !== selectedCommunity) return false;
       return true;
     });
-  }, [nodes, minCitations, minPublications, selectedCommunity]);
+
+    if (leadersPerCommunity > 0) {
+      const groups = new Map<number, Node[]>();
+      result.forEach(node => {
+        if (!groups.has(node.community)) groups.set(node.community, []);
+        groups.get(node.community)!.push(node);
+      });
+
+      const leaderSet = new Set<number>();
+      groups.forEach((communityNodes) => {
+        const sorted = [...communityNodes].sort((a, b) => {
+          if (nodeSizing === "citations") return b.citations - a.citations;
+          if (nodeSizing === "pagerank") return b.pagerank - a.pagerank;
+          return b.publications - a.publications;
+        });
+        sorted.slice(0, leadersPerCommunity).forEach(n => leaderSet.add(n.id));
+      });
+
+      result = result.filter(node => leaderSet.has(node.id));
+    }
+
+    return result;
+  }, [nodes, minCitations, minPublications, selectedCommunity, leadersPerCommunity, nodeSizing]);
 
   const filteredNodeIds = useMemo(() => new Set(filteredNodes.map(n => n.id)), [filteredNodes]);
 
@@ -501,8 +563,17 @@ export default function NetworkVisualizer({ apiBase, onClose }: NetworkVisualize
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-4 overflow-hidden">
         {/* Left Side: Parameters tuning drawer */}
         <aside className="bg-slate-900/40 border-r border-slate-900 p-6 overflow-y-auto space-y-6 select-none custom-scrollbar">
-          <div className="flex items-center gap-2 text-slate-400 uppercase tracking-wider text-xs font-bold mb-2">
-            <Sliders className="w-4 h-4 text-blue-500" /> Control Knobs
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-slate-400 uppercase tracking-wider text-xs font-bold">
+              <Sliders className="w-4 h-4 text-blue-500" /> Control Knobs
+            </div>
+            <button
+              onClick={saveAsDefaults}
+              className="text-[10px] bg-blue-600/80 hover:bg-blue-600 text-white font-bold px-2.5 py-1 rounded-lg border border-blue-500/50 shadow-sm transition-all"
+              title="Save current tuning settings as defaults for future runs"
+            >
+              {savedNotification ? "Saved Defaults!" : "Save Defaults"}
+            </button>
           </div>
 
           {/* Sizing & Filtering */}
@@ -559,6 +630,31 @@ export default function NetworkVisualizer({ apiBase, onClose }: NetworkVisualize
                 onChange={(e) => setMinPublications(parseInt(e.target.value))}
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
               />
+            </div>
+
+            <div>
+              <div className="flex justify-between text-xs font-semibold mb-1">
+                <span className="text-slate-400">Leaders Per Group</span>
+                <span className="text-blue-400 font-bold">
+                  {leadersPerCommunity === 0 ? "All Authors" : `Top ${leadersPerCommunity} Leader${leadersPerCommunity > 1 ? 's' : ''}`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="5"
+                step="1"
+                value={leadersPerCommunity}
+                onChange={(e) => setLeadersPerCommunity(parseInt(e.target.value))}
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              />
+              <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                <span>All</span>
+                <span>Top 1</span>
+                <span>Top 2</span>
+                <span>Top 3</span>
+                <span>Top 5</span>
+              </div>
             </div>
           </div>
 
