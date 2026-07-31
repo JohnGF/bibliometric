@@ -60,3 +60,51 @@ class CountryAnalysis:
         
         logger.info(f"Extracted {len(records)} country affiliation records across {evolution_pl['Country'].n_unique()} unique countries.")
         return exploded_pl.to_pandas(), evolution_pl.to_pandas()
+
+    def calculate_country_cagr(self, evolution_df: pd.DataFrame, min_total_papers: int = 10) -> pd.DataFrame:
+        """
+        Computes total publication count and CAGR growth rate (%) for each country.
+        """
+        if evolution_df.empty or "Country" not in evolution_df.columns:
+            return pd.DataFrame()
+
+        records = []
+        grouped = evolution_df.groupby("Country")
+        
+        for country, group in grouped:
+            total_count = group["Count"].sum()
+            if total_count < min_total_papers:
+                continue
+                
+            sorted_g = group.sort_values("Year")
+            first_row = sorted_g.iloc[0]
+            last_row = sorted_g.iloc[-1]
+            
+            y_start = int(first_row["Year"])
+            y_end = int(last_row["Year"])
+            c_start = int(first_row["Count"])
+            c_end = int(last_row["Count"])
+            
+            y_diff = y_end - y_start
+            if y_diff > 0 and c_start > 0:
+                cagr = ((c_end / c_start) ** (1.0 / y_diff) - 1.0) * 100.0
+            else:
+                cagr = 0.0
+                
+            trend = "Surging" if cagr > 15 else ("Emerging" if cagr > 5 else "Established")
+            
+            records.append({
+                "Country": country,
+                "Total_Count": total_count,
+                "First_Year": y_start,
+                "First_Year_Count": c_start,
+                "Last_Year": y_end,
+                "Last_Year_Count": c_end,
+                "CAGR_percent": cagr,
+                "Trend": trend
+            })
+            
+        res_df = pd.DataFrame(records)
+        if not res_df.empty:
+            res_df = res_df.sort_values("Total_Count", ascending=False).reset_index(drop=True)
+        return res_df

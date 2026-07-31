@@ -1,5 +1,5 @@
-# Use RAPIDS 25.06 with CUDA 12.8 to match the host's 12.8 driver
-FROM nvcr.io/nvidia/rapidsai/base:25.06-cuda12.8-py3.11
+# Use official stable RAPIDS release with CUDA 12.0 (compatible with host CUDA drivers)
+FROM nvcr.io/nvidia/rapidsai/base:24.12-cuda12.0-py3.11
 
 # Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvbin/uv
@@ -33,9 +33,6 @@ LABEL description="Containerized Bibliometric Research Pipeline with GPU support
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV UV_LINK_MODE=copy
-
-# Volume for data and results
-VOLUME ["/app/data", "/app/pipeline_results"]
 
 # FastAPI port
 EXPOSE 8000

@@ -10,6 +10,46 @@ class CitationsAnalysis:
     def __init__(self):
         pass
 
+    def extract_references_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Unpacks semicolon/comma/newline-separated 'References' string column from publication DataFrame
+        into a references DataFrame with 'source', 'destination', 'authors', and 'year' columns.
+        """
+        if "References" not in df.columns or df["References"].dropna().empty:
+            logger.warning("No 'References' column found in publication dataset.")
+            return pd.DataFrame(columns=["source", "destination", "authors", "year"])
+        
+        rows = []
+        source_col = "DOI" if "DOI" in df.columns and df["DOI"].notnull().any() else ("Title" if "Title" in df.columns else df.columns[0])
+        
+        for _, row in df[df["References"].notnull()].iterrows():
+            src_val = str(row[source_col]).strip() if pd.notnull(row[source_col]) else ""
+            if not src_val or src_val == "nan":
+                src_val = str(row.get("Title", "Unknown_Source")).strip()
+            
+            raw_refs = str(row["References"])
+            delimiters = [";", "\n", "|"]
+            refs_list = [raw_refs]
+            for d in delimiters:
+                refs_list = [item for sublist in refs_list for item in sublist.split(d)]
+                
+            authors_val = str(row.get("Authors", "N/A"))
+            year_val = row.get("Year", 2020)
+            
+            for ref in refs_list:
+                cleaned_ref = ref.strip()
+                if cleaned_ref and cleaned_ref.lower() != "nan":
+                    rows.append({
+                        "source": src_val,
+                        "destination": cleaned_ref,
+                        "authors": authors_val,
+                        "year": year_val
+                    })
+                    
+        res_df = pd.DataFrame(rows)
+        logger.info(f"Extracted {len(res_df):,} reference links from publication dataset.")
+        return res_df
+
     def calculate_co_citation(self, references_df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[sp.csr_matrix]]:
         """
         Calculates co-citation counts for cited papers.

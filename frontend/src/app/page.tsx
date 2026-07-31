@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Search, Play, FileText, CheckCircle, AlertCircle, Loader2, Download, Database, BarChart3, Network, Sliders, UploadCloud, RefreshCw, RotateCcw, Target, Layers } from "lucide-react";
+import { Search, Play, FileText, CheckCircle, AlertCircle, Loader2, Download, Database, BarChart3, Network, Sliders, UploadCloud, RefreshCw, RotateCcw, Target, Layers, Sparkles } from "lucide-react";
 import NetworkVisualizer from "./NetworkVisualizer";
+import DataVisualizerStudio from "./DataVisualizerStudio";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -16,6 +17,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [health, setHealth] = useState<{status: string, gpu_available: boolean} | null>(null);
   const [showVisualizer, setShowVisualizer] = useState(false);
+  const [showStudio, setShowStudio] = useState(false);
+  const [studioFile, setStudioFile] = useState<string>("");
   const [cagrData, setCagrData] = useState<any[]>([]);
   const [countryData, setCountryData] = useState<any[]>([]);
   const [researchLines, setResearchLines] = useState<any[]>([]);
@@ -267,6 +270,16 @@ export default function Dashboard() {
           <p className="text-slate-500 italic">FastAPI + Next.js Research Dashboard</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setStudioFile(dataFiles[0] || "");
+              setShowStudio(true);
+            }}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md shadow-indigo-200 flex items-center gap-1.5 transition-all"
+          >
+            <Sparkles className="w-4 h-4" />
+            Visualizer Studio
+          </button>
           <span className={`px-3 py-1 rounded-full text-xs font-semibold ${health?.status === "healthy" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
             API: {health?.status || "Checking..." }
           </span>
@@ -492,6 +505,17 @@ export default function Dashboard() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setStudioFile(file);
+                              setShowStudio(true);
+                            }}
+                            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border border-indigo-200"
+                            title="Customize charts & visuals"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            Visualize
+                          </button>
                           <a 
                             href={`${API_BASE}/data/${file}`} 
                             target="_blank"
@@ -705,6 +729,14 @@ export default function Dashboard() {
 
       {showVisualizer && (
         <NetworkVisualizer apiBase={API_BASE} onClose={() => setShowVisualizer(false)} />
+      )}
+
+      {showStudio && (
+        <DataVisualizerStudio 
+          apiBase={API_BASE} 
+          onClose={() => setShowStudio(false)}
+          initialFile={studioFile}
+        />
       )}
     </main>
   );

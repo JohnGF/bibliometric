@@ -5,11 +5,18 @@ import signal
 import time
 
 def run():
-    print("=== Initializing Bibliometric Pipeline (Cross-Platform) ===")
+    print("=== Initializing Bibliometric Pipeline (System-Aware) ===")
     
     # Set copy mode for uv since workspace is on an external drive partition
     os.environ["UV_LINK_MODE"] = "copy"
     
+    # Run system setup script if requested or first run
+    if "--setup" in sys.argv or "-s" in sys.argv:
+        from scripts.setup_system import main as setup_main
+        setup_main()
+        if len(sys.argv) == 2:
+            return
+
     # Check if 'uv' is available
     use_uv = False
     try:

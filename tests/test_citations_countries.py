@@ -82,3 +82,27 @@ def test_co_citation_and_coupling():
                      
     assert len(c_pair) == 1
     assert c_pair["coupling_weight"].values[0] == 2
+
+def test_extract_references_df():
+    analyzer = CitationsAnalysis()
+    paper_df = pd.DataFrame([
+        {
+            "Title": "Paper 1",
+            "DOI": "10.1000/1",
+            "Authors": "Author X",
+            "Year": 2021,
+            "References": "10.2000/a; 10.2000/b; 10.2000/c"
+        },
+        {
+            "Title": "Paper 2",
+            "DOI": "10.1000/2",
+            "Authors": "Author Y",
+            "Year": 2022,
+            "References": "10.2000/a; 10.2000/b"
+        }
+    ])
+    
+    extracted = analyzer.extract_references_df(paper_df)
+    assert len(extracted) == 5
+    assert set(extracted.columns) == {"source", "destination", "authors", "year"}
+    assert extracted[extracted["source"] == "10.1000/1"]["destination"].nunique() == 3

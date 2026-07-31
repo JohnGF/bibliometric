@@ -90,29 +90,39 @@ class NetworkAnalysis:
         edges_pdf['dest_id'] = edges_pdf['destination'].map(author_to_id)
 
         if self.use_gpu:
+            logging.info("NetworkAnalysis: Running GPU-accelerated co-authorship analysis (cuGraph/cuDF)...")
             edges_gdf = cudf.from_pandas(edges_pdf[['source_id', 'dest_id', 'weight']])
             self.graph = cugraph.Graph()
             self.graph.from_cudf_edgelist(edges_gdf, source='source_id', destination='dest_id', edge_attr='weight')
             partition, _ = cugraph.louvain(self.graph)
             pagerank = cugraph.pagerank(self.graph)
-            betweenness = cugraph.betweenness_centrality(self.graph)
             degree = cugraph.degree_centrality(self.graph)
 
             partition = partition.merge(pagerank, on='vertex')
-            partition = partition.merge(betweenness, on='vertex')
             partition = partition.merge(degree, on='vertex')
+            
             try:
-                pos_gdf = cugraph.force_atlas2(self.graph, max_iter=500)
-                partition = partition.merge(pos_gdf[['vertex', 'x', 'y']], on='vertex', how='left')
-            except Exception:
-                pass
+                betweenness = cugraph.betweenness_centrality(self.graph)
+                partition = partition.merge(betweenness, on='vertex', how='left')
+            except Exception as e:
+                logging.warning(f"GPU betweenness centrality skipped ({e}). Louvain, PageRank, and Degree running on GPU.")
+            # Note: layout coordinates (x, y) are computed smoothly during visualization in viz.py
+            # to avoid cuGraph C++ CUDA ForceAtlas2 memory segfaults on disconnected graphs.
         else:
+            logging.info("NetworkAnalysis: Running CPU-mode co-authorship analysis (NetworkX)...")
             edges_pdf_cpu = edges_pdf[['source_id', 'dest_id', 'weight']]
             nx_graph = nx.from_pandas_edgelist(edges_pdf_cpu, source='source_id', target='dest_id', edge_attr='weight')
             self.graph = nx_graph
             partition_dict = community_louvain.best_partition(nx_graph)
             pagerank_dict = nx.pagerank(nx_graph, weight='weight')
-            betweenness_dict = nx.betweenness_centrality(nx_graph, weight='weight')
+            
+            # For CPU performance, sample k nodes if graph is large
+            num_nodes = len(nx_graph)
+            if num_nodes > 500:
+                betweenness_dict = nx.betweenness_centrality(nx_graph, k=min(num_nodes, 500), weight='weight', seed=42)
+            else:
+                betweenness_dict = nx.betweenness_centrality(nx_graph, weight='weight')
+
             degree_dict = nx.degree_centrality(nx_graph)
             pos_dict = nx.spring_layout(nx_graph, k=0.35, iterations=100, seed=42)
 
@@ -120,9 +130,9 @@ class NetworkAnalysis:
                 {
                     'vertex': k,
                     'partition': v,
-                    'pagerank': pagerank_dict[k],
-                    'betweenness_centrality': betweenness_dict[k],
-                    'degree_centrality': degree_dict[k],
+                    'pagerank': pagerank_dict.get(k, 0.0),
+                    'betweenness_centrality': betweenness_dict.get(k, 0.0),
+                    'degree_centrality': degree_dict.get(k, 0.0),
                     'x': pos_dict[k][0],
                     'y': pos_dict[k][1]
                 }

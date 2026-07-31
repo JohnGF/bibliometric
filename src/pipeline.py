@@ -9,9 +9,12 @@ from src.core.collection import UnifiedCollector
 from src.core.countries import CountryAnalysis
 from src.core.citations import CitationsAnalysis
 from src.core.screening import PaperScreener
+from src.core.latex_exporter import LaTeXExporter
 import os
 import logging
 import argparse
+
+import time
 
 # Auto-load .env if present
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
@@ -26,19 +29,32 @@ if os.path.exists(env_path):
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+def _print_stage_summary(title: str, bullets: List[str], elapsed_sec: Optional[float] = None):
+    """Prints a clean ASCII bullet-point summary box to stdout with optional stage execution timing."""
+    time_header = f" (Execution: {elapsed_sec:.2f}s)" if elapsed_sec is not None else ""
+    header = f"=== ANALYSIS SUMMARY: {title}{time_header} ==="
+    border = "=" * max(len(header), 65)
+    print(f"\n{border}\n{header}\n{border}")
+    for bullet in bullets:
+        print(f"  * {bullet}")
+    if elapsed_sec is not None:
+        print(f"  * Stage Execution Time: {elapsed_sec:.2f} seconds ({elapsed_sec/60:.2f} min)")
+    print(f"{border}\n")
+
 class BibliometricPipeline:
     def __init__(self, output_dir: str = "pipeline_results", config: Optional[dict] = None):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
+        self.config = config or {}
         self.viz = Visualization()
         self.nlp = BERTopicPipeline()
         self.network = NetworkAnalysis()
-        self.collector = UnifiedCollector(config=config)
+        self.collector = UnifiedCollector(config=self.config)
         self.country_analyzer = CountryAnalysis()
         self.citation_analyzer = CitationsAnalysis()
         
         # Screening configuration (Option 1: Embeddings, Option 2: LLM)
-        config = config or {}
+        config = self.config
         use_screen_emb = config.get("screen_embeddings", False)
         use_screen_llm = config.get("screen_llm", False)
         emb_threshold = config.get("embedding_threshold", 0.35)
@@ -159,22 +175,51 @@ class BibliometricPipeline:
                 return stage_name in stages
             return True
 
+        t_pipeline_start = time.time()
+
         if should_run("growth", False):
+            t_stage = time.time()
             logging.info("Generating yearly growth charts and 2026 projections...")
             growth_df = self.viz.plot_yearly_growth(df, save_path=os.path.join(self.output_dir, "yearly_growth.pdf"))
             if growth_df is not None and not growth_df.empty:
                 growth_df.to_csv(os.path.join(self.output_dir, "yearly_growth.csv"), index=False)
+                total_pubs = int(growth_df["len"].sum())
+                min_yr = int(growth_df["Year"].min())
+                max_yr = int(growth_df["Year"].max())
+                peak_idx = growth_df["len"].idxmax()
+                peak_row = growth_df.loc[peak_idx]
+                bullets = [
+                    f"Total Publications: {total_pubs:,} across years {min_yr} to {max_yr}",
+                    f"Peak Publication Year: {int(peak_row['Year'])} ({int(peak_row['len']):,} publications)",
+                ]
+                if "is_projected" in growth_df.columns and growth_df["is_projected"].any():
+                    proj_row = growth_df[growth_df["is_projected"]].iloc[0]
+                    bullets.append(f"Current Year ({int(proj_row['Year'])}): {int(proj_row['len']):,} YTD (Projected Full Year: {int(proj_row['projected_len']):,})")
+                _print_stage_summary("Yearly Growth & Projections", bullets, elapsed_sec=time.time() - t_stage)
         
         # 3. Country Evolution Analysis
         if should_run("country", skip_country) and "Affiliations" in df_pd.columns:
+            t_stage = time.time()
             logging.info("Running country evolution analysis...")
             exploded_pub, country_ev = self.country_analyzer.process_countries(df)
             if not country_ev.empty:
                 country_ev.to_csv(os.path.join(self.output_dir, "country_evolution.csv"), index=False)
                 self.viz.plot_country_evolution(country_ev, top_n=top_n_countries, save_path=os.path.join(self.output_dir, "country_evolution.pdf"))
+                self.viz.plot_country_choropleth_map(country_ev, save_path=os.path.join(self.output_dir, "country_world_map.pdf"))
+                country_totals = country_ev.groupby("Country")["Count"].sum().sort_values(ascending=False)
+                top_5 = country_totals.head(5)
+                top_5_str = ", ".join([f"{c} ({int(cnt):,})" for c, cnt in top_5.items()])
+                top_country_name = country_totals.index[0]
+                bullets = [
+                    f"Total Contributing Countries Identified: {len(country_totals)}",
+                    f"Top Contributor Country: {top_country_name} ({int(country_totals.iloc[0]):,} papers)",
+                    f"Top 5 Countries: {top_5_str}",
+                ]
+                _print_stage_summary("Country Evolution", bullets, elapsed_sec=time.time() - t_stage)
 
         # 4. Keyword CAGR Analysis
         if should_run("cagr", skip_cagr) and "Author Keywords" in df_pd.columns:
+            t_stage = time.time()
             logging.info("Running keyword CAGR analysis...")
             try:
                 kw_df = self.nlp.preprocess_keywords(df, column="Author Keywords")
@@ -185,11 +230,20 @@ class BibliometricPipeline:
                         cagr_pandas = cagr_df.to_pandas()
                         cagr_pandas.to_csv(os.path.join(self.output_dir, "keywords_cagr.csv"), index=False)
                         self.viz.plot_keywords_cagr(cagr_pandas, save_path=os.path.join(self.output_dir, "keywords_cagr.pdf"))
+                        top_5_cagr = cagr_pandas.nlargest(5, "cagr_percent")
+                        top_5_kw_str = ", ".join([f"{r['standardized_word']} (+{r['cagr_percent']:.1f}%)" for _, r in top_5_cagr.iterrows()])
+                        bullets = [
+                            f"Total Unique Keywords Analyzed: {len(cagr_pandas):,}",
+                            f"Top Trending Research Focus: '{top_5_cagr.iloc[0]['standardized_word']}' (+{top_5_cagr.iloc[0]['cagr_percent']:.1f}% CAGR)",
+                            f"Top 5 Fastest Growing Keywords: {top_5_kw_str}",
+                        ]
+                        _print_stage_summary("Keyword CAGR Analysis", bullets, elapsed_sec=time.time() - t_stage)
             except Exception as e:
                 logging.error(f"Failed to run keyword CAGR analysis: {e}")
 
         # 5. NLP (Topics)
         if should_run("nlp", skip_nlp):
+            t_stage = time.time()
             logging.info("Running BERTopic modeling...")
             docs = df["Abstract"].drop_nulls().to_list()
             # BERTopic requires at least 10 documents to cluster successfully
@@ -205,6 +259,18 @@ class BibliometricPipeline:
                 research_lines = self.nlp.get_research_lines(nr_clusters=5)
                 if not research_lines.empty:
                     research_lines.to_csv(os.path.join(self.output_dir, "topic_research_lines.csv"), index=False)
+                
+                if topic_info is not None:
+                    valid_topics = topic_info[topic_info["Topic"] != -1]
+                    top_3_t = valid_topics.nlargest(3, "Count")
+                    top_3_str = "; ".join([f"Topic {r['Topic']} ({r['Name'][:30]}...): {r['Count']} papers" for _, r in top_3_t.iterrows()])
+                    bullets = [
+                        f"Abstracts Modeled: {len(docs):,}",
+                        f"Discovered Distinct Topics: {len(valid_topics)}",
+                        f"Top 3 Dominant Themes: {top_3_str}",
+                        f"High-Level Research Lines Generated: {len(research_lines)}"
+                    ]
+                    _print_stage_summary("Topic Modeling (BERTopic)", bullets, elapsed_sec=time.time() - t_stage)
             else:
                 logging.warning(f"Too few abstracts ({len(docs)}) for topic modeling. Skipping BERTopic.")
         else:
@@ -212,6 +278,7 @@ class BibliometricPipeline:
 
         # 6. Network Analysis (Co-authorship)
         if should_run("network", skip_network):
+            t_stage = time.time()
             logging.info("Building co-authorship network...")
             edges_df, node_meta = self.network.build_co_authorship_graph(df)
             
@@ -236,12 +303,86 @@ class BibliometricPipeline:
                 logging.info("Generating static co-authorship network PDF graph...")
                 top_per_comm = self.config.get("top_per_community", 1)
                 self.viz.plot_network(edges_df, node_meta, save_path=os.path.join(self.output_dir, "network_graph.pdf"), top_per_community=top_per_comm)
+                
+                num_nodes = len(node_meta)
+                num_edges = len(edges_df)
+                num_comms = node_meta['partition'].nunique() if 'partition' in node_meta.columns else 0
+                leaders = []
+                if 'partition' in node_meta.columns and 'author_name' in node_meta.columns and 'num_publications' in node_meta.columns:
+                    for _, group in node_meta.groupby('partition'):
+                        top_author = group.sort_values('num_publications', ascending=False).iloc[0]['author_name']
+                        leaders.append(top_author)
+                leaders_str = ", ".join(leaders[:5]) if leaders else "N/A"
+                bullets = [
+                    f"Author Network Nodes: {num_nodes:,}",
+                    f"Co-authorship Connections (Edges): {num_edges:,}",
+                    f"Author Communities Discovered: {num_comms}",
+                    f"Top Community Representative Leaders: {leaders_str}",
+                ]
+                _print_stage_summary("Co-Authorship Network", bullets, elapsed_sec=time.time() - t_stage)
 
         else:
             logging.info("Skipping network analysis as requested.")
 
+        # 7. Co-Citation Network Stage
+        if should_run("cocitation", False):
+            t_stage = time.time()
+            logging.info("Running Co-Citation Network analysis stage...")
+            ref_df = None
+            if refs_path and os.path.exists(refs_path):
+                logging.info(f"Loading external references file from {refs_path}...")
+                ref_df = pd.read_csv(refs_path)
+            elif "References" in df_pd.columns and df_pd["References"].notnull().any():
+                logging.info("Extracting reference links from publication dataset...")
+                ref_df = self.citation_analyzer.extract_references_df(df_pd)
+
+            if ref_df is not None and not ref_df.empty:
+                try:
+                    cocit_df, X = self.citation_analyzer.calculate_co_citation(ref_df)
+                    if not cocit_df.empty:
+                        cocit_df.to_csv(os.path.join(self.output_dir, "network_cocitations.csv"), index=False)
+                        logging.info("Generating static Co-Citation network PDF graph...")
+                        self.viz.plot_cocitation_network(cocit_df, save_path=os.path.join(self.output_dir, "cocitation_graph.pdf"))
+                        
+                        top_pair = cocit_df.iloc[0]
+                        bullets = [
+                            f"Total Reference Links Extracted: {len(ref_df):,}",
+                            f"Unique Cited Publications: {ref_df['destination'].nunique():,}",
+                            f"Co-Citation Connections Found: {len(cocit_df):,}",
+                            f"Top Co-Cited Pair: '{str(top_pair['cited_1'])[:30]}' & '{str(top_pair['cited_2'])[:30]}' ({int(top_pair['co_citation_count']):,} co-citations)",
+                        ]
+                        _print_stage_summary("Co-Citation Network Analysis", bullets, elapsed_sec=time.time() - t_stage)
+                        
+                        self.last_cocit_df = cocit_df
+                        self.last_sparse_X = X
+                        self.last_ref_df = ref_df
+                except Exception as e:
+                    logging.exception(f"Error during co-citation analysis: {e}")
+            else:
+                logging.warning("No reference data available for co-citation analysis.")
+
+        # 8. Bibliographic Coupling Stage
+        if should_run("coupling", False):
+            t_stage = time.time()
+            logging.info("Running Bibliographic Coupling analysis stage...")
+            if hasattr(self, 'last_sparse_X') and self.last_sparse_X is not None and hasattr(self, 'last_ref_df') and self.last_ref_df is not None:
+                try:
+                    df_clean = self.last_ref_df[['source', 'destination']].dropna().drop_duplicates(subset=['source', 'destination'])
+                    source_codes, source_uniques = pd.factorize(df_clean['source'])
+                    coupling_df = self.citation_analyzer.calculate_bibliographic_coupling(self.last_sparse_X, source_uniques)
+                    if not coupling_df.empty:
+                        coupling_df.to_csv(os.path.join(self.output_dir, "network_coupling.csv"), index=False)
+                        bullets = [
+                            f"Bibliographic Coupling Pairs Found: {len(coupling_df):,}",
+                            f"Top Coupled Pair Weight: {int(coupling_df['coupling_weight'].max()):,} shared references",
+                        ]
+                        _print_stage_summary("Bibliographic Coupling Analysis", bullets, elapsed_sec=time.time() - t_stage)
+                except Exception as e:
+                    logging.exception(f"Error during bibliographic coupling analysis: {e}")
+
         # 7. Percolation Analysis Stage
         if should_run("percolation", skip_percolation):
+            t_stage = time.time()
             logging.info("Running percolation threshold analysis stage...")
             edges_for_perc = None
             if 'edges_df' in locals() and not edges_df.empty:
@@ -273,6 +414,14 @@ class BibliometricPipeline:
                             percolation_df, w_col,
                             save_path=os.path.join(self.output_dir, "percolation_analysis.pdf")
                         )
+                        num_steps = len(percolation_df)
+                        max_lcc_pct = percolation_df['lcc_nodes_percentage_of_filtered'].max() if 'lcc_nodes_percentage_of_filtered' in percolation_df.columns else 0.0
+                        bullets = [
+                            f"Weight Cutoff Steps Evaluated: {num_steps}",
+                            f"Peak Giant Component (LCC) Coverage: {max_lcc_pct:.1f}% of filtered network",
+                            f"Results saved to: {os.path.join(self.output_dir, 'percolation_results.csv')}",
+                        ]
+                        _print_stage_summary("Percolation Analysis", bullets, elapsed_sec=time.time() - t_stage)
                 except Exception as e:
                     logging.exception(f"Error during percolation analysis stage: {e}")
             else:
@@ -280,11 +429,19 @@ class BibliometricPipeline:
         else:
             logging.info("Skipping percolation stage as requested.")
 
-        logging.info(f"Pipeline complete. All results saved to {self.output_dir}")
+        try:
+            exporter = LaTeXExporter(self.output_dir)
+            exporter.export_all()
+        except Exception as e:
+            logging.warning(f"Could not export LaTeX templates: {e}")
+
+        total_elapsed = time.time() - t_pipeline_start
+        logging.info(f"Pipeline complete in {total_elapsed:.2f}s ({total_elapsed/60:.2f} min). All results saved to {self.output_dir}")
 
 def main():
     parser = argparse.ArgumentParser(description="Bibliometric Research Pipeline CLI")
     parser.add_argument("--file", type=str, help="Path to local CSV/Parquet file")
+    parser.add_argument("--refs-file", type=str, help="Path to external references CSV file")
     parser.add_argument("--query", type=str, help="Search query for autonomous collection")
     parser.add_argument("--query-file", type=str, help="Path to text file containing search query")
     parser.add_argument("--limit", type=int, default=100, help="Limit per source for collection (set to 0 for unlimited / fetch all matching papers)")
@@ -316,7 +473,16 @@ def main():
     parser.add_argument("--skip-country", action="store_true", help="Skip country evolution stage")
     parser.add_argument("--skip-percolation", action="store_true", help="Skip percolation analysis stage")
 
+    # Interactive Visualization Engine Option
+    parser.add_argument("--interactive", "-i", action="store_true", help="Launch interactive graph parameter editor REPL session")
+
     args = parser.parse_args()
+
+    if args.interactive:
+        from scripts.interactive_viz import InteractiveVizSession
+        session = InteractiveVizSession(output_dir=args.output)
+        session.run_menu()
+        return
 
     active_query = args.query
     if args.query_file and os.path.exists(args.query_file):
@@ -361,7 +527,7 @@ def main():
     if active_query:
         pipeline.run_with_query(active_query, limit=args.limit, start_year=args.start_year, end_year=args.end_year)
     elif args.file:
-        pipeline.run(args.file, config=config)
+        pipeline.run(args.file, refs_path=args.refs_file, config=config)
     else:
         parser.print_help()
 
