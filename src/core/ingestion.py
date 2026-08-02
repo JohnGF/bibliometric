@@ -21,10 +21,16 @@ class PublicationSchema(BaseModel):
     eid: Optional[str] = Field(None, alias="EID")
     references: Optional[str] = Field(None, alias="References")
 
-    @validator("abstract", "authors", "author_keywords", "index_keywords", "source_title", "affiliations", "doi", "eid", "references", pre=True)
+    @validator("title", "abstract", "authors", "author_keywords", "index_keywords", "source_title", "affiliations", "doi", "eid", "references", pre=True)
     def parse_strings(cls, v):
-        if pd.isna(v) or v == "":
+        if pd.isna(v) or v == "" or v is None:
             return None
+        return str(v)
+
+    @validator("title", pre=True)
+    def parse_title(cls, v):
+        if pd.isna(v) or v == "" or v is None:
+            return "Untitled Publication"
         return str(v)
 
     @validator("year", pre=True)

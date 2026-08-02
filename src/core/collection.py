@@ -61,15 +61,38 @@ class UnifiedCollector:
         else:
             target_sources = [s for s in self.collectors.keys() if allow_preprints or s not in PREPRINT_SOURCES]
 
-        for source in target_sources:
-            if source in self.collectors:
-                df = self.collectors[source].fetch_papers(
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        valid_sources = [s for s in target_sources if s in self.collectors]
+        for s in target_sources:
+            if s not in self.collectors:
+                logger.warning(f"Source {s} not recognized.")
+
+        def _fetch_single_source(src_name: str) -> pd.DataFrame:
+            logger.info(f"Starting parallel fetch for source: {src_name}")
+            try:
+                collector = self.collectors[src_name]
+                return collector.fetch_papers(
                     query, limit=limit_per_source, start_year=start_year, end_year=end_year
                 )
-                if not df.empty:
-                    all_dfs.append(df)
-            else:
-                logger.warning(f"Source {source} not recognized.")
+            except Exception as e:
+                logger.error(f"Error in parallel fetch for {src_name}: {e}")
+                return pd.DataFrame()
+
+        with ThreadPoolExecutor(max_workers=min(len(valid_sources), 8) or 1) as executor:
+            futures = {
+                executor.submit(_fetch_single_source, src): src
+                for src in valid_sources
+            }
+            for future in as_completed(futures):
+                src_name = futures[future]
+                try:
+                    df = future.result()
+                    if not df.empty:
+                        all_dfs.append(df)
+                        logger.info(f"Finished parallel fetch for {src_name}: {len(df)} papers retrieved.")
+                except Exception as e:
+                    logger.error(f"Failed to get result for {src_name}: {e}")
 
         if not all_dfs:
             return pd.DataFrame()

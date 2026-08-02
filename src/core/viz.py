@@ -351,10 +351,10 @@ class Visualization:
             logger.info(f"Saved methodology vs application matrix to {save_path} and {png_path}")
         plt.close()
 
-    def plot_network(self, edges_df: pd.DataFrame, node_meta: pd.DataFrame, save_path: Optional[str] = None, top_per_community: int = 1, show_heatmap: bool = True):
+    def plot_network(self, edges_df: pd.DataFrame, node_meta: pd.DataFrame, save_path: Optional[str] = None, top_per_community: int = 2, show_heatmap: bool = True):
         """
-        Plots a high-resolution, static co-authorship network with fused edge density heatmaps
-        and community-representative prominent labels.
+        Plots a high-resolution, publication-grade co-authorship network focusing on the 
+        Giant Connected Component and prominent core research communities.
         """
         import networkx as nx
 
@@ -363,42 +363,43 @@ class Visualization:
             
         fig, ax = plt.subplots(figsize=(16, 12))
         
-        # Build NetworkX Graph
-        G = nx.Graph()
-        
-        # Add nodes with attributes
+        # Build full NetworkX Graph
+        G_full = nx.Graph()
         for _, row in node_meta.iterrows():
-            G.add_node(
+            G_full.add_node(
                 row['vertex'], 
                 name=row['author_name'], 
                 partition=row['partition'],
-                size=row.get('num_publications', 1)
+                size=row.get('num_publications', 1),
+                citations=row.get('total_citations', 0)
             )
-            
-        # Add edges
         for _, row in edges_df.iterrows():
-            G.add_edge(row['source_id'], row['dest_id'], weight=row['weight'])
+            G_full.add_edge(row['source_id'], row['dest_id'], weight=row['weight'])
             
-        # Layout calculation: reuse pre-computed x, y coordinates if available in node_meta
-        if 'x' in node_meta.columns and 'y' in node_meta.columns and not node_meta['x'].isnull().all():
-            pos = {row['vertex']: (row['x'], row['y']) for _, row in node_meta.iterrows() if row['vertex'] in G}
+        # Filter for Giant Connected Component & prominent nodes to eliminate ugly isolated 2-node noise
+        if len(G_full) > 150:
+            # Extract components with at least 4 nodes or top 150 authors by citations/pubs
+            components = [c for c in nx.connected_components(G_full) if len(c) >= 3]
+            if components:
+                nodes_to_keep = set().union(*components)
+            else:
+                nodes_to_keep = set(G_full.nodes())
+                
+            # Filter top 150 most prominent authors if network is huge
+            top_nodes = sorted(nodes_to_keep, key=lambda n: (G_full.nodes[n]['size'], G_full.nodes[n]['citations']), reverse=True)[:150]
+            G = G_full.subgraph(top_nodes).copy()
         else:
-            pos = nx.spring_layout(G, k=0.35, iterations=100, seed=42)
-            # Cache coordinates back into node_meta for instant future re-renders
-            node_meta['x'] = node_meta['vertex'].map(lambda v: pos[v][0] if v in pos else None)
-            node_meta['y'] = node_meta['vertex'].map(lambda v: pos[v][1] if v in pos else None)
-            if save_path:
-                try:
-                    nodes_csv = save_path.replace("network_graph.pdf", "network_nodes.csv")
-                    if os.path.exists(nodes_csv):
-                        node_meta.to_csv(nodes_csv, index=False)
-                except Exception:
-                    pass
+            G = G_full.copy()
+
+        if len(G) == 0:
+            G = G_full
+
+        # Layout calculation: calculate clean spring layout with optimal node separation
+        pos = nx.spring_layout(G, k=0.45, iterations=120, seed=42)
             
         # 1. Edge Density Heatmap Layer
         if show_heatmap and len(G.edges) > 5:
             try:
-                # Extract edge midpoint and endpoint positions for 2D KDE density
                 edge_x = []
                 edge_y = []
                 for u, v in G.edges:
@@ -411,11 +412,11 @@ class Visualization:
                     sns.kdeplot(
                         x=edge_x, y=edge_y,
                         ax=ax,
-                        cmap="YlOrRd",
+                        cmap="Blues",
                         fill=True,
-                        thresh=0.08,
-                        levels=10,
-                        alpha=0.3,
+                        thresh=0.05,
+                        levels=12,
+                        alpha=0.25,
                         zorder=1
                     )
             except Exception:
@@ -424,18 +425,22 @@ class Visualization:
         # Color mapping (community partitions)
         partitions = [G.nodes[n]['partition'] for n in G.nodes]
         unique_partitions = list(set(partitions))
-        color_palette = sns.color_palette("tab10", len(unique_partitions))
+        color_palette = sns.color_palette("tab10", max(len(unique_partitions), 10))
         partition_colors = {p: color_palette[i % len(color_palette)] for i, p in enumerate(unique_partitions)}
         node_colors = [partition_colors[G.nodes[n]['partition']] for n in G.nodes]
         
         # Node sizing scaling
-        node_sizes = [G.nodes[n]['size'] * 150 + 80 for n in G.nodes]
+        all_sizes = [G.nodes[n]['size'] for n in G.nodes]
+        max_s = max(all_sizes) if all_sizes else 1
+        node_sizes = [(G.nodes[n]['size'] / max_s) * 600 + 120 for n in G.nodes]
         
         # Edge weights scaling
-        edge_widths = [G[u][v]['weight'] * 0.6 for u, v in G.edges]
+        all_w = [G[u][v]['weight'] for u, v in G.edges]
+        max_w = max(all_w) if all_w else 1
+        edge_widths = [(G[u][v]['weight'] / max_w) * 3.0 + 0.5 for u, v in G.edges]
         
         # Draw elements
-        edges_collection = nx.draw_networkx_edges(G, pos, ax=ax, width=edge_widths, alpha=0.2, edge_color='gray')
+        edges_collection = nx.draw_networkx_edges(G, pos, ax=ax, width=edge_widths, alpha=0.3, edge_color='#555555')
         if edges_collection is not None:
             if isinstance(edges_collection, list):
                 for e in edges_collection:
@@ -443,93 +448,345 @@ class Visualization:
             else:
                 edges_collection.set_zorder(2)
                 
-        nodes_collection = nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=node_sizes, alpha=0.85, edgecolors='black', linewidths=0.5)
+        nodes_collection = nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=node_sizes, alpha=0.9, edgecolors='white', linewidths=1.0)
         if nodes_collection is not None:
             nodes_collection.set_zorder(3)
         
-        # 2. Prominent Representative Labeling (Top N per community)
+        # 2. Prominent Representative Labeling (Top community leaders)
+        community_nodes = {}
+        for n in G.nodes:
+            part = G.nodes[n]['partition']
+            community_nodes.setdefault(part, []).append(n)
+
+        candidate_nodes = []
+        for part, nodes_in_part in community_nodes.items():
+            sorted_nodes = sorted(nodes_in_part, key=lambda node: (G.nodes[node]['size'], G.nodes[node]['citations']), reverse=True)
+            for rep_node in sorted_nodes[:top_per_community]:
+                candidate_nodes.append(rep_node)
+
+        # Limit to top 12 overall core leaders
+        candidate_nodes = sorted(candidate_nodes, key=lambda n: G.nodes[n]['size'], reverse=True)[:12]
+        labels = {n: G.nodes[n]['name'] for n in candidate_nodes}
+                
+        # Draw popping labels with crisp rounded callout boxes
+        for node_id, label_text in labels.items():
+            if node_id in pos:
+                x, y = pos[node_id]
+                ax.text(
+                    x, y + 0.04, label_text,
+                    fontsize=10, fontweight='bold', ha='center', va='bottom',
+                    zorder=4,
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=partition_colors[G.nodes[node_id]['partition']], alpha=0.95, lw=1.5)
+                )
+        
+        plt.title("Co-authorship Network Density & Key Community Leaders", fontsize=18, pad=15, fontweight="bold")
+        plt.axis('off')
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            if save_path.endswith(".pdf"):
+                png_path = save_path[:-4] + ".png"
+                plt.savefig(png_path, dpi=200, bbox_inches="tight")
+        return fig
+
+    def plot_circular_community_network(self, edges_df: pd.DataFrame, node_meta: pd.DataFrame, save_path: Optional[str] = None, top_per_community: int = 2, edge_alpha: float = 0.45, max_edge_width: float = 3.5):
+        """
+        Plots a publication-grade, uncluttered co-authorship network using a 
+        Louvain-Grouped Circular Ring Layout with community-colored inter-community collaboration chords.
+        """
+        import networkx as nx
+        import numpy as np
+        import matplotlib.patches as mpatches
+        from matplotlib.path import Path
+
+        if edges_df.empty or node_meta.empty:
+            return None
+            
+        fig, ax = plt.subplots(figsize=(16, 14))
+        
+        # Build full NetworkX Graph
+        G_full = nx.Graph()
+        for _, row in node_meta.iterrows():
+            G_full.add_node(
+                row['vertex'], 
+                name=row['author_name'], 
+                partition=row['partition'],
+                size=row.get('num_publications', 1),
+                citations=row.get('total_citations', 0)
+            )
+        for _, row in edges_df.iterrows():
+            G_full.add_edge(row['source_id'], row['dest_id'], weight=row['weight'])
+            
+        # Select top prominent nodes across communities to keep visual presentation ultra-clean
+        if len(G_full) > 100:
+            top_nodes = sorted(G_full.nodes(), key=lambda n: (G_full.nodes[n]['size'], G_full.nodes[n]['citations']), reverse=True)[:100]
+            G = G_full.subgraph(top_nodes).copy()
+        else:
+            G = G_full.copy()
+
+        if len(G) == 0:
+            G = G_full
+
+        # --- LOUVAIN-GROUPED CIRCULAR LAYOUT ALGORITHM ---
         community_nodes = {}
         for n in G.nodes:
             part = G.nodes[n]['partition']
             community_nodes.setdefault(part, []).append(n)
             
-        # Determine minimum size threshold for label eligibility (90th percentile or min 5 publications)
-        all_sizes = [G.nodes[n]['size'] for n in G.nodes]
-        min_label_size = max(5, float(pd.Series(all_sizes).quantile(0.90))) if len(all_sizes) > 10 else 2
-
-        candidate_nodes = []
-        for part, nodes_in_part in community_nodes.items():
-            sorted_nodes = sorted(nodes_in_part, key=lambda node: G.nodes[node]['size'], reverse=True)
-            for rep_node in sorted_nodes[:top_per_community]:
-                if G.nodes[rep_node]['size'] >= min_label_size:
-                    candidate_nodes.append(rep_node)
-
-        # Limit to top overall core leaders across the entire network (max 8-10 badges)
-        candidate_nodes = sorted(candidate_nodes, key=lambda n: G.nodes[n]['size'], reverse=True)[:10]
-        labels = {n: G.nodes[n]['name'] for n in candidate_nodes}
-                
-        # Draw popping labels with white rounded bounding boxes for top community leaders
-        for node_id, label_text in labels.items():
-            if node_id in pos:
-                x, y = pos[node_id]
-                ax.text(
-                    x, y + 0.035, label_text,
-                    fontsize=9, fontweight='bold', ha='center', va='bottom',
-                    zorder=4,
-                    bbox=dict(boxstyle="round,pad=0.25", fc="white", ec=partition_colors[G.nodes[node_id]['partition']], alpha=0.9, lw=1.2)
-                )
+        sorted_partitions = sorted(community_nodes.keys(), key=lambda p: len(community_nodes[p]), reverse=True)
+        total_nodes = len(G.nodes)
+        pos = {}
+        angles = {}
         
-        plt.title("Co-authorship Network Density & Key Community Leaders", fontsize=18, pad=15)
+        current_angle = 0.0
+        gap_angle = (2 * np.pi * 0.15) / max(len(sorted_partitions), 1)
+        available_angle = 2 * np.pi - (gap_angle * len(sorted_partitions))
+        
+        color_palette = sns.color_palette("tab10", max(len(sorted_partitions), 10))
+        partition_colors = {p: color_palette[i % len(color_palette)] for i, p in enumerate(sorted_partitions)}
+
+        radius = 1.0
+        for i, part in enumerate(sorted_partitions):
+            nodes_in_part = sorted(community_nodes[part], key=lambda n: G.nodes[n]['size'], reverse=True)
+            part_angle_span = available_angle * (len(nodes_in_part) / total_nodes)
+            
+            angle_step = part_angle_span / max(len(nodes_in_part), 1)
+            for j, node in enumerate(nodes_in_part):
+                theta = current_angle + (j + 0.5) * angle_step
+                pos[node] = (radius * np.cos(theta), radius * np.sin(theta))
+                angles[node] = theta
+                
+            current_angle += part_angle_span + gap_angle
+
+        # 1. Draw Community-Colored Inter-Community Collaboration Chords
+        all_w = [G[u][v]['weight'] for u, v in G.edges]
+        max_w = max(all_w) if all_w else 1
+        
+        for u, v in G.edges:
+            p1, p2 = pos[u], pos[v]
+            part1, part2 = G.nodes[u]['partition'], G.nodes[v]['partition']
+            w = G[u][v]['weight']
+            lw = (w / max_w) * max_edge_width + 0.8
+            
+            edge_c = partition_colors[part1]  # Color by source community
+            
+            if part1 == part2:
+                # Intra-community edge (perimeter arc)
+                ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color=edge_c, alpha=edge_alpha + 0.1, lw=lw, zorder=2)
+            else:
+                # Inter-community curved chord
+                path_data = [
+                    (Path.MOVETO, p1),
+                    (Path.CURVE3, (0.0, 0.0)),
+                    (Path.CURVE3, p2)
+                ]
+                codes, verts = zip(*path_data)
+                path = Path(verts, codes)
+                patch = mpatches.PathPatch(path, facecolor='none', edgecolor=edge_c, alpha=edge_alpha, lw=lw, zorder=1)
+                ax.add_patch(patch)
+
+        # 2. Draw Nodes along Circular Ring
+        all_sizes = [G.nodes[n]['size'] for n in G.nodes]
+        max_s = max(all_sizes) if all_sizes else 1
+        node_sizes = [(G.nodes[n]['size'] / max_s) * 500 + 100 for n in G.nodes]
+        node_colors = [partition_colors[G.nodes[n]['partition']] for n in G.nodes]
+
+        ax.scatter(
+            [pos[n][0] for n in G.nodes],
+            [pos[n][1] for n in G.nodes],
+            s=node_sizes,
+            c=node_colors,
+            alpha=0.95,
+            edgecolors='white',
+            linewidths=1.2,
+            zorder=3
+        )
+
+        # 3. Radial Outward Vector Labeling for ALL Nodes
+        for node_id in G.nodes:
+            if node_id in pos:
+                theta = angles[node_id]
+                r_label = radius + 0.04
+                lx, ly = r_label * np.cos(theta), r_label * np.sin(theta)
+                
+                label_text = G.nodes[node_id]['name']
+                deg_angle = np.degrees(theta) % 360
+                
+                # Polar angle text orientation (readable text math)
+                if 90 < deg_angle <= 270:
+                    rot = deg_angle + 180
+                    ha = 'right'
+                else:
+                    rot = deg_angle
+                    ha = 'left'
+                
+                # Font size scaled by publication importance
+                size_ratio = G.nodes[node_id]['size'] / max_s
+                fs = 7.0 + (size_ratio * 4.0)
+                font_weight = 'bold' if size_ratio > 0.3 else 'normal'
+                
+                ax.text(
+                    lx, ly, label_text,
+                    fontsize=fs, fontweight=font_weight, ha=ha, va='center',
+                    rotation=rot, rotation_mode='anchor',
+                    color=partition_colors[G.nodes[node_id]['partition']],
+                    zorder=4
+                )
+
+        ax.set_xlim(-1.65, 1.65)
+        ax.set_ylim(-1.65, 1.65)
+        plt.title("Louvain Community Clustered Co-authorship Ring Network", fontsize=18, pad=25, fontweight="bold")
         plt.axis('off')
         plt.tight_layout()
         
         if save_path:
-            plt.savefig(save_path, dpi=300)
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
             if save_path.endswith(".pdf"):
                 png_path = save_path[:-4] + ".png"
-                plt.savefig(png_path, dpi=200)
+                plt.savefig(png_path, dpi=200, bbox_inches="tight")
         return fig
 
-    def plot_cocitation_network(self, cocit_df: pd.DataFrame, top_n: int = 30, save_path: Optional[str] = None):
-        """Plots top co-cited papers network graph."""
+    def plot_cocitation_network(self, cocit_df: pd.DataFrame, top_n: int = 30, title_map: Optional[dict] = None, save_path: Optional[str] = None):
+        """
+        Plots top co-cited papers network graph with short paper titles and 
+        clickable OpenAlex / DOI hyperlinked badges.
+        """
         if cocit_df.empty:
             return None
             
         import networkx as nx
         top_cocit = cocit_df.nlargest(top_n * 2, "co_citation_count")
         G = nx.Graph()
+        
+        # Built-in seminal paper titles dictionary for co-citation literature
+        seminal_titles = {
+            "W31182665": "Delorme et al. (2004) EEGLAB",
+            "W2122816088": "Oostenveld et al. (2011) FieldTrip",
+            "W2768132193": "Lawhern et al. (2018) EEGNet",
+            "W2804784400": "Koelstra et al. (2012) DEAP Dataset",
+            "W3003415550": "Goldberger et al. (2000) PhysioNet",
+            "W4315754639": "Schirrmeister et al. (2017) Deep Learning",
+            "W1861891407": "Makeig et al. (1996) BSS Artifact Removal",
+            "W1877917243": "Wolpaw et al. (2002) Brain-Computer Interfaces",
+            "W1502633200": "Ang et al. (2008) Filter Bank CSP",
+            "W1502967669": "Pfurtscheller et al. (1999) Event-Related Sync",
+            "W1593442063": "Polich et al. (2007) Updating P300",
+            "W2137604100": "Klimesch et al. (1999) EEG Alpha Oscillations",
+            "W2567564314": "Bell & Sejnowski (1995) InfoMax ICA",
+            "W2125744415": "Brainard et al. (1997) Psychophysics Toolbox"
+        }
+
+        # Build node title lookup
+        def _get_short_title(raw_id: str) -> str:
+            clean_id = str(raw_id).strip().rstrip("/")
+            wid = clean_id.split("/")[-1]
+            if wid in seminal_titles:
+                return seminal_titles[wid]
+                
+            if title_map:
+                if clean_id in title_map and title_map[clean_id].get("title"):
+                    words = title_map[clean_id]["title"].split()
+                    return " ".join(words[:5]) + ("..." if len(words) > 5 else "")
+                if wid in title_map and title_map[wid].get("title"):
+                    words = title_map[wid]["title"].split()
+                    return " ".join(words[:5]) + ("..." if len(words) > 5 else "")
+                    
+            if wid.startswith("W"):
+                try:
+                    import urllib.request, json
+                    req = urllib.request.Request(f"https://api.openalex.org/works/{wid}", headers={"User-Agent": "BibliometricPipeline/1.0"})
+                    with urllib.request.urlopen(req, timeout=2) as resp:
+                        res_data = json.loads(resp.read().decode('utf-8'))
+                        t = res_data.get("display_name", "")
+                        authors = res_data.get("authorships", [])
+                        yr = res_data.get("publication_year", "")
+                        if t:
+                            words = t.split()
+                            short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
+                            if authors:
+                                first_au = authors[0].get("author", {}).get("display_name", "").split()[-1]
+                                title_str = f"{first_au} et al. ({yr}) {short_t}"
+                            else:
+                                title_str = short_t
+                            seminal_titles[wid] = title_str
+                            return title_str
+                except Exception:
+                    pass
+
+            if "10." in clean_id:
+                return f"DOI: {clean_id[:25]}..."
+            return str(clean_id)[:30]
+
+        def _get_url(raw_id: str) -> str:
+            clean_id = str(raw_id).strip().rstrip("/")
+            wid = clean_id.split("/")[-1]
+            if title_map:
+                if clean_id in title_map and title_map[clean_id].get("url"):
+                    return title_map[clean_id]["url"]
+                if wid in title_map and title_map[wid].get("url"):
+                    return title_map[wid]["url"]
+            if wid in seminal_titles:
+                return f"https://openalex.org/{wid}"
+            if wid.startswith("W"):
+                return f"https://openalex.org/{wid}"
+            elif "10." in clean_id:
+                doi = clean_id[clean_id.find("10."):]
+                return f"https://doi.org/{doi}"
+            return f"https://openalex.org/{wid}"
+
         for _, row in top_cocit.iterrows():
-            c1 = str(row['cited_1'])[:35]
-            c2 = str(row['cited_2'])[:35]
-            G.add_edge(c1, c2, weight=row['co_citation_count'])
+            c1_raw = str(row['cited_1']).strip()
+            c2_raw = str(row['cited_2']).strip()
+            
+            c1_label = _get_short_title(c1_raw)
+            c2_label = _get_short_title(c2_raw)
+            
+            G.add_node(c1_label, raw_id=c1_raw, url=_get_url(c1_raw))
+            G.add_node(c2_label, raw_id=c2_raw, url=_get_url(c2_raw))
+            G.add_edge(c1_label, c2_label, weight=row['co_citation_count'])
             
         if G.number_of_nodes() == 0:
             return None
             
         fig, ax = plt.subplots(figsize=(16, 12))
-        pos = nx.spring_layout(G, k=0.4, iterations=50, seed=42)
+        pos = nx.spring_layout(G, k=0.45, iterations=60, seed=42)
         
         degrees = dict(G.degree(weight='weight'))
-        node_sizes = [degrees.get(n, 1) * 30 + 100 for n in G.nodes]
+        node_sizes = [degrees.get(n, 1) * 35 + 120 for n in G.nodes]
         
-        nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.25, edge_color="gray", width=1.5)
-        nx.draw_networkx_nodes(G, pos, ax=ax, node_size=node_sizes, node_color="#2b5c8f", alpha=0.85, edgecolors="black")
+        nx.draw_networkx_edges(G, pos, ax=ax, alpha=0.3, edge_color="#444444", width=1.5)
         
-        top_labels = sorted(G.nodes, key=lambda n: degrees.get(n, 0), reverse=True)[:12]
+        # Draw node circles with hyperlinks attached
+        for n in G.nodes:
+            x, y = pos[n]
+            sz = degrees.get(n, 1) * 35 + 120
+            url = G.nodes[n].get("url", "")
+            ax.scatter(x, y, s=sz, c="#1f77b4", alpha=0.9, edgecolors="white", linewidths=1.2, zorder=3, url=url)
+        
+        # Attach hyperlinked text badges for all nodes
+        top_labels = sorted(G.nodes, key=lambda n: degrees.get(n, 0), reverse=True)
         for n in top_labels:
             x, y = pos[n]
-            ax.text(x, y + 0.04, n, fontsize=8, fontweight='bold', ha='center', va='bottom',
-                    bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="#2b5c8f", alpha=0.9))
+            url = G.nodes[n].get("url", "")
+            
+            txt_obj = ax.text(
+                x, y + 0.035, n, 
+                fontsize=8.5, fontweight='bold', ha='center', va='bottom',
+                url=url,
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#1f77b4", alpha=0.95, lw=1.2)
+            )
+            txt_obj.set_url(url)
                     
-        plt.title("Co-Citation Network (Top Frequently Co-Cited Reference Literature)", fontsize=16, pad=15)
+        plt.title("Co-Citation Network (Top Frequently Co-Cited Reference Literature)", fontsize=16, pad=15, fontweight="bold")
         plt.axis('off')
         plt.tight_layout()
         
         if save_path:
-            plt.savefig(save_path, dpi=300)
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
             if save_path.endswith(".pdf"):
                 png_path = save_path[:-4] + ".png"
-                plt.savefig(png_path, dpi=200)
+                plt.savefig(png_path, dpi=200, bbox_inches="tight")
         return fig
 
     def plot_keywords_cagr(self, cagr_df: pd.DataFrame, top_n: int = 15, save_path: Optional[str] = None):

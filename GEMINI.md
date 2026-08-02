@@ -4,13 +4,22 @@
 The project is a modular, schema-driven Python pipeline for bibliometric research, utilizing GPU acceleration (RAPIDS) for network analysis and advanced NLP (BERTopic) for topic modeling.
 
 - **`src/core/collectors/`**: Modular API interfaces (OpenAlex, Semantic Scholar).
+- **`src/core/exporters/`**: Modular single-responsibility LaTeX table exporters (one script per table).
+- **`src/core/latex_exporter.py`**: Lightweight IEEEtran LaTeX paper scaffold orchestrator.
 - **`src/core/collection.py`**: `UnifiedCollector` for multi-source fetching and deduplication.
 - **`src/core/ingestion.py`**: Data loading and Pydantic schema validation.
 - **`src/core/nlp.py`**: BERTopic modeling and CAGR calculations.
 - **`src/core/network.py`**: GPU-accelerated co-authorship networks via `cuGraph`.
-- **`src/core/viz.py`**: Centralized visualization logic.
+- **`src/core/viz.py`**: Centralized visualization logic (`plot_circular_community_network`, `plot_cocitation_network`, etc.).
 - **`src/pipeline.py`**: Orchestration layer with CLI support.
 - **`src/ui/app.py`**: Flet-based GUI for autonomous collection and pipeline execution.
+
+### Expected Output Directory Structure (`pipeline_results_37k/`)
+- **`figures/`**: PDF and PNG visual plots (`Figure_1.pdf` through `Figure_25.pdf`).
+- **`tables/`**: Formatted LaTeX `.tex` table snippets (`tab_top_references_pagerank.tex`, `annex_*.tex`).
+- **`data/`**: Intermediate CSV raw data files (`network_nodes.csv`, `topic_info.csv`, `keywords_cagr.csv`).
+- **`paper_scaffold.tex`**: Master IEEEtran camera-ready LaTeX template.
+- **`paper_scaffold.pdf`**: Final compiled 10-page manuscript.
 
 ## 2. Key Features
 - **Autonomous Collection**: Fetch papers by query and year range from OpenAlex and Semantic Scholar.

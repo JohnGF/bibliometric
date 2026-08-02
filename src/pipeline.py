@@ -303,6 +303,8 @@ class BibliometricPipeline:
                 logging.info("Generating static co-authorship network PDF graph...")
                 top_per_comm = self.config.get("top_per_community", 1)
                 self.viz.plot_network(edges_df, node_meta, save_path=os.path.join(self.output_dir, "network_graph.pdf"), top_per_community=top_per_comm)
+                logging.info("Generating Louvain-clustered circular chord network PDF graph...")
+                self.viz.plot_circular_community_network(edges_df, node_meta, save_path=os.path.join(self.output_dir, "network_circular_chord.pdf"), top_per_community=top_per_comm)
                 
                 num_nodes = len(node_meta)
                 num_edges = len(edges_df)
@@ -341,8 +343,19 @@ class BibliometricPipeline:
                     cocit_df, X = self.citation_analyzer.calculate_co_citation(ref_df)
                     if not cocit_df.empty:
                         cocit_df.to_csv(os.path.join(self.output_dir, "network_cocitations.csv"), index=False)
-                        logging.info("Generating static Co-Citation network PDF graph...")
-                        self.viz.plot_cocitation_network(cocit_df, save_path=os.path.join(self.output_dir, "cocitation_graph.pdf"))
+                        title_map = {}
+                        if "Title" in df_pd.columns:
+                            for _, r in df_pd.iterrows():
+                                eid = str(r.get("EID", "") or "").strip()
+                                doi = str(r.get("DOI", "") or "").strip()
+                                t = str(r.get("Title", "") or "").strip()
+                                url = f"https://doi.org/{doi}" if doi else (f"https://openalex.org/{eid}" if eid else "")
+                                if eid:
+                                    title_map[eid] = {"title": t, "url": url}
+                                if doi:
+                                    title_map[doi] = {"title": t, "url": url}
+
+                        self.viz.plot_cocitation_network(cocit_df, title_map=title_map, save_path=os.path.join(self.output_dir, "cocitation_graph.pdf"))
                         
                         top_pair = cocit_df.iloc[0]
                         bullets = [

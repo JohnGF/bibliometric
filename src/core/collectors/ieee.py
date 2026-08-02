@@ -20,22 +20,38 @@ class IEEECollector:
         self.api_key = api_key
         self.email = email
 
-    def fetch_papers(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
-        """Fetches IEEE papers matching query and year range."""
+    def fetch_papers(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None, resume: bool = True) -> pd.DataFrame:
+        """Fetches IEEE papers matching query and year range with checkpoint recovery."""
         if self.api_key:
-            df = self._fetch_official_api(query, limit, start_year, end_year)
+            df = self._fetch_official_api(query, limit, start_year, end_year, resume=resume)
             if not df.empty:
                 return df
             logger.warning("IEEE Official API returned empty or failed. Falling back to OpenAlex IEEE Publisher Index...")
 
-        return self._fetch_via_openalex_ieee(query, limit, start_year, end_year)
+        return self._fetch_via_openalex_ieee(query, limit, start_year, end_year, resume=resume)
 
-    def _fetch_official_api(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
-        logger.info(f"Fetching IEEE papers via Official API Key (limit={limit})...")
+    def _fetch_official_api(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None, resume: bool = True) -> pd.DataFrame:
+        from src.core.collectors.checkpoint import ScrapeCheckpointManager
+        checkpoint_mgr = ScrapeCheckpointManager()
+
         all_results = []
-        max_records = min(limit if limit > 0 else 200, 200)
+        received_pages = []
         start_record = 1
-        
+        page = 0
+        max_records = min(limit if limit > 0 else 200, 200)
+
+        if resume:
+            checkpoint = checkpoint_mgr.load("ieee_official", query, start_year, end_year)
+            if checkpoint:
+                all_results = checkpoint.get("items", [])
+                received_pages = checkpoint.get("received_pages", [])
+                start_record = checkpoint.get("offset", 1)
+                page = checkpoint.get("last_page", 0)
+                if checkpoint.get("is_complete") or (limit > 0 and len(all_results) >= limit):
+                    logger.info(f"IEEE Official API fetch restored from checkpoint ({len(all_results)} items).")
+                    return self._official_to_dataframe(all_results[:limit] if limit > 0 else all_results)
+
+        logger.info(f"Fetching IEEE papers via Official API Key (start_record={start_record}, limit={limit})...")
         clean_query = re.sub(r'[\(\)\*\"]', ' ', query)
         clean_query = re.sub(r'\s+', ' ', clean_query).strip()
 
@@ -52,27 +68,56 @@ class IEEECollector:
             if end_year:
                 params["end_year"] = end_year
 
+            page += 1
             try:
                 r = httpx.get(self.API_URL, params=params, timeout=30.0)
                 r.raise_for_status()
                 data = r.json()
                 articles = data.get("articles", [])
                 if not articles:
+                    if resume:
+                        checkpoint_mgr.save("ieee_official", query, all_results, start_year, end_year, page=page, offset=start_record, received_pages=received_pages, is_complete=True)
                     break
                 all_results.extend(articles)
                 start_record += len(articles)
-                
-                if limit > 0 and len(all_results) >= limit:
-                    break
-                if len(articles) < max_records:
+                received_pages.append(page)
+
+                is_end = (len(articles) < max_records) or (limit > 0 and len(all_results) >= limit)
+                if resume:
+                    checkpoint_mgr.save("ieee_official", query, all_results, start_year, end_year, page=page, offset=start_record, received_pages=received_pages, is_complete=is_end)
+
+                if is_end:
                     break
             except Exception as e:
-                logger.error(f"Error fetching from IEEE Official API: {e}")
+                logger.error(f"Error fetching from IEEE Official API (saved checkpoint page {page}, items {len(all_results)}): {e}")
                 break
 
         return self._official_to_dataframe(all_results)
 
-    def _fetch_via_openalex_ieee(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
+    def _fetch_via_openalex_ieee(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None, resume: bool = True) -> pd.DataFrame:
+        from src.core.collectors.checkpoint import ScrapeCheckpointManager
+        checkpoint_mgr = ScrapeCheckpointManager()
+
+        all_results = []
+        received_pages = []
+        cursor = "*"
+        page = 0
+        per_page = 200
+        is_unlimited = (limit is None or limit <= 0)
+        fetched = 0
+
+        if resume:
+            checkpoint = checkpoint_mgr.load("ieee_openalex", query, start_year, end_year)
+            if checkpoint:
+                all_results = checkpoint.get("items", [])
+                received_pages = checkpoint.get("received_pages", [])
+                cursor = checkpoint.get("last_cursor", "*")
+                page = checkpoint.get("last_page", 0)
+                fetched = len(all_results)
+                if checkpoint.get("is_complete") or (not is_unlimited and fetched >= limit):
+                    logger.info(f"IEEE OpenAlex fetch restored from checkpoint ({fetched} items).")
+                    return self._openalex_to_dataframe(all_results[:limit] if not is_unlimited else all_results)
+
         logger.info(f"Fetching IEEE papers via OpenAlex IEEE Publisher index...")
         headers = {}
         if self.email:
@@ -94,14 +139,10 @@ class IEEECollector:
             clean_query = re.sub(r'\s+', ' ', clean_query).strip()
             search_param = clean_query
 
-        all_results = []
-        cursor = "*"
-        per_page = 200
-        is_unlimited = (limit is None or limit <= 0)
-        fetched = 0
-
         while True:
             if not is_unlimited and fetched >= limit:
+                if resume:
+                    checkpoint_mgr.save("ieee_openalex", query, all_results, start_year, end_year, page=page, cursor=cursor, received_pages=received_pages, is_complete=True)
                 break
             current_per_page = per_page if is_unlimited else min(per_page, limit - fetched)
             params = {
@@ -112,6 +153,8 @@ class IEEECollector:
             }
             if search_param:
                 params["search"] = search_param
+
+            page += 1
             try:
                 r = httpx.get(self.OPENALEX_URL, params=params, headers=headers, timeout=30.0)
                 r.raise_for_status()
@@ -121,15 +164,22 @@ class IEEECollector:
                 next_cursor = meta.get("next_cursor")
 
                 if not results:
+                    if resume:
+                        checkpoint_mgr.save("ieee_openalex", query, all_results, start_year, end_year, page=page, cursor=cursor, received_pages=received_pages, is_complete=True)
                     break
                 all_results.extend(results)
                 fetched += len(results)
+                received_pages.append(page)
 
-                if not next_cursor or next_cursor == cursor or len(results) < current_per_page:
+                is_end = (not next_cursor or next_cursor == cursor or len(results) < current_per_page)
+                if resume:
+                    checkpoint_mgr.save("ieee_openalex", query, all_results, start_year, end_year, page=page, cursor=next_cursor or cursor, received_pages=received_pages, is_complete=is_end)
+
+                if is_end:
                     break
                 cursor = next_cursor
             except Exception as e:
-                logger.error(f"Error fetching IEEE papers via OpenAlex: {e}")
+                logger.error(f"Error fetching IEEE papers via OpenAlex (saved checkpoint page {page}): {e}")
                 break
 
         return self._openalex_to_dataframe(all_results)

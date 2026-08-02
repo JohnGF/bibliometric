@@ -9,16 +9,25 @@ try:
     import cudf
     import cugraph
     import rmm
-    # Test if GPU is actually available
+    # Enable CUDA Managed Memory so GPU memory allocations spill over into System RAM safely
+    rmm.reinitialize(managed_memory=True)
     import cupy
     cupy.cuda.Device(0).use()
     HAS_GPU = True
-except Exception:
+except Exception as e:
+    logging.warning(f"GPU RAPIDS initialization skipped ({e}). Using CPU network engine.")
     HAS_GPU = False
 
-if not HAS_GPU:
-    import networkx as nx
-    import community as community_louvain  # python-louvain
+# CPU Fallback Engines (python-igraph C-engine preferred, networkx fallback)
+HAS_IGRAPH = False
+try:
+    import igraph as ig
+    HAS_IGRAPH = True
+except ImportError:
+    pass
+
+import networkx as nx
+import community as community_louvain  # python-louvain
 
 class NetworkAnalysis:
     def __init__(self, use_gpu: bool = True):
@@ -90,6 +99,16 @@ class NetworkAnalysis:
         edges_pdf['dest_id'] = edges_pdf['destination'].map(author_to_id)
 
         if self.use_gpu:
+            try:
+                import cupy
+                free_mem, total_mem = cupy.cuda.Device(0).mem_info
+                logging.info(f"[GPU DIAGNOSTIC] VRAM Available: {free_mem / 1e9:.2f} GB free / {total_mem / 1e9:.2f} GB total")
+                logging.info(f"[GPU DIAGNOSTIC] Graph Size: {len(unique_authors):,} author nodes, {len(edges_pdf):,} co-authorship edges")
+                est_bytes = (len(unique_authors) + len(edges_pdf)) * 64
+                logging.info(f"[GPU DIAGNOSTIC] Estimated Memory required for cuGraph buffers: ~{est_bytes / 1e6:.2f} MB")
+            except Exception as e:
+                logging.warning(f"Could not query GPU memory info: {e}")
+
             logging.info("NetworkAnalysis: Running GPU-accelerated co-authorship analysis (cuGraph/cuDF)...")
             edges_gdf = cudf.from_pandas(edges_pdf[['source_id', 'dest_id', 'weight']])
             self.graph = cugraph.Graph()
@@ -101,11 +120,39 @@ class NetworkAnalysis:
             partition = partition.merge(pagerank, on='vertex')
             partition = partition.merge(degree, on='vertex')
             
-            try:
-                betweenness = cugraph.betweenness_centrality(self.graph)
-                partition = partition.merge(betweenness, on='vertex', how='left')
-            except Exception as e:
-                logging.warning(f"GPU betweenness centrality skipped ({e}). Louvain, PageRank, and Degree running on GPU.")
+            if len(unique_authors) <= 3000:
+                try:
+                    betweenness = cugraph.betweenness_centrality(self.graph, k=min(100, len(unique_authors)))
+                    partition = partition.merge(betweenness, on='vertex', how='left')
+                except Exception as e:
+                    logging.warning(f"GPU betweenness centrality skipped ({e}). Louvain, PageRank, and Degree running on GPU.")
+                    partition['betweenness_centrality'] = 0.0
+            else:
+                logging.info("Running Component-Decomposition Sampling for GPU betweenness centrality (>3000 nodes)...")
+                try:
+                    # Component decomposition sampling to prevent CUDA Brandes queue memory crash
+                    comps = cugraph.connected_components(self.graph)
+                    comp_counts = comps['labels'].value_counts()
+                    # Find vertices in significant components
+                    major_labels = comp_counts[comp_counts > 2].index.to_pandas().tolist()
+                    
+                    if major_labels:
+                        # Extract major component subgraph
+                        major_vertices = comps[comps['labels'].isin(major_labels)]['vertex']
+                        sub_gdf = edges_gdf[edges_gdf['source_id'].isin(major_vertices) & edges_gdf['dest_id'].isin(major_vertices)]
+                        if not sub_gdf.empty:
+                            sub_g = cugraph.Graph()
+                            sub_g.from_cudf_edgelist(sub_gdf, source='source_id', destination='dest_id', edge_attr='weight')
+                            betweenness = cugraph.betweenness_centrality(sub_g, k=min(100, len(major_vertices)))
+                            partition = partition.merge(betweenness, on='vertex', how='left')
+                            partition['betweenness_centrality'] = partition['betweenness_centrality'].fillna(0.0)
+                        else:
+                            partition['betweenness_centrality'] = 0.0
+                    else:
+                        partition['betweenness_centrality'] = 0.0
+                except Exception as e:
+                    logging.warning(f"Component betweenness sampling fallback triggered ({e}).")
+                    partition['betweenness_centrality'] = 0.0
             # Note: layout coordinates (x, y) are computed smoothly during visualization in viz.py
             # to avoid cuGraph C++ CUDA ForceAtlas2 memory segfaults on disconnected graphs.
         else:
@@ -124,7 +171,12 @@ class NetworkAnalysis:
                 betweenness_dict = nx.betweenness_centrality(nx_graph, weight='weight')
 
             degree_dict = nx.degree_centrality(nx_graph)
-            pos_dict = nx.spring_layout(nx_graph, k=0.35, iterations=100, seed=42)
+
+            # Skip spring_layout for large graphs (>1000 nodes) to avoid O(N^2) CPU freeze (layout is computed in viz.py)
+            if num_nodes <= 1000:
+                pos_dict = nx.spring_layout(nx_graph, k=0.35, iterations=50, seed=42)
+            else:
+                pos_dict = {k: (0.0, 0.0) for k in nx_graph.nodes()}
 
             partition = pd.DataFrame([
                 {
@@ -133,8 +185,8 @@ class NetworkAnalysis:
                     'pagerank': pagerank_dict.get(k, 0.0),
                     'betweenness_centrality': betweenness_dict.get(k, 0.0),
                     'degree_centrality': degree_dict.get(k, 0.0),
-                    'x': pos_dict[k][0],
-                    'y': pos_dict[k][1]
+                    'x': pos_dict.get(k, (0.0, 0.0))[0],
+                    'y': pos_dict.get(k, (0.0, 0.0))[1]
                 }
                 for k, v in partition_dict.items()
             ])

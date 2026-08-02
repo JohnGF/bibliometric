@@ -14,17 +14,35 @@ class OpenAlexCollector:
         if email:
             self.headers["mailto"] = email
 
-    def fetch_papers(self, query: str, limit: Optional[int] = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
-        """Fetches papers from OpenAlex using cursor-based deep pagination.
+    def fetch_papers(self, query: str, limit: Optional[int] = 100, start_year: Optional[int] = None, end_year: Optional[int] = None, resume: bool = True) -> pd.DataFrame:
+        """Fetches papers from OpenAlex using cursor-based deep pagination with automatic checkpoint recovery.
         
         Set limit=None or limit=0 for unlimited fetching of all matching papers.
+        Set resume=True to automatically recover from previous interrupted session/pages.
         """
+        from src.core.collectors.checkpoint import ScrapeCheckpointManager
+        checkpoint_mgr = ScrapeCheckpointManager()
+        
         all_results = []
+        received_pages = []
         per_page = 200  # OpenAlex max items per request
         cursor = "*"
+        page = 0
         fetched = 0
         is_unlimited = (limit is None or limit <= 0)
-        
+
+        if resume:
+            checkpoint = checkpoint_mgr.load("openalex", query, start_year, end_year)
+            if checkpoint:
+                all_results = checkpoint.get("items", [])
+                received_pages = checkpoint.get("received_pages", [])
+                cursor = checkpoint.get("last_cursor", "*")
+                page = checkpoint.get("last_page", 0)
+                fetched = len(all_results)
+                if checkpoint.get("is_complete") or (not is_unlimited and fetched >= limit):
+                    logger.info(f"OpenAlex fetch fully restored from checkpoint ({fetched} items).")
+                    return self._to_dataframe(all_results[:limit] if not is_unlimited else all_results)
+
         filters = []
         if start_year:
             filters.append(f"from_publication_date:{start_year}-01-01")
@@ -32,12 +50,6 @@ class OpenAlexCollector:
             filters.append(f"to_publication_date:{end_year}-12-31")
             
         has_boolean = any(w in query.upper() for w in [" AND ", " OR ", " NOT "]) or '"' in query
-        
-        filters = []
-        if start_year:
-            filters.append(f"from_publication_date:{start_year}-01-01")
-        if end_year:
-            filters.append(f"to_publication_date:{end_year}-12-31")
             
         if has_boolean:
             filters.append(f"title_and_abstract.search:{query}")
@@ -51,6 +63,8 @@ class OpenAlexCollector:
 
         while True:
             if not is_unlimited and fetched >= limit:
+                if resume:
+                    checkpoint_mgr.save("openalex", query, all_results, start_year, end_year, page=page, cursor=cursor, received_pages=received_pages, is_complete=True)
                 break
                 
             current_per_page = per_page if is_unlimited else min(per_page, limit - fetched)
@@ -64,7 +78,8 @@ class OpenAlexCollector:
             if filters:
                 params["filter"] = ",".join(filters)
                 
-            logger.info(f"Fetching batch from OpenAlex (Fetched: {fetched}{'/' + str(limit) if not is_unlimited else ''}, Cursor: {cursor[:10]}...)")
+            page += 1
+            logger.info(f"Fetching batch from OpenAlex (Page {page}, Fetched: {fetched}{'/' + str(limit) if not is_unlimited else ''}, Cursor: {str(cursor)[:10]}...)")
             try:
                 data = self._make_request(params)
                 results = data.get("results", [])
@@ -72,18 +87,25 @@ class OpenAlexCollector:
                 next_cursor = meta.get("next_cursor")
 
                 if not results:
+                    if resume:
+                        checkpoint_mgr.save("openalex", query, all_results, start_year, end_year, page=page, cursor=cursor, received_pages=received_pages, is_complete=True)
                     break
                     
                 all_results.extend(results)
                 fetched += len(results)
+                received_pages.append(page)
 
-                # Stop if no next cursor or no remaining results
-                if not next_cursor or next_cursor == cursor or len(results) < current_per_page:
+                is_end = (not next_cursor or next_cursor == cursor or len(results) < current_per_page)
+                
+                if resume:
+                    checkpoint_mgr.save("openalex", query, all_results, start_year, end_year, page=page, cursor=next_cursor or cursor, received_pages=received_pages, is_complete=is_end)
+
+                if is_end:
                     break
                     
                 cursor = next_cursor
             except Exception as e:
-                logger.error(f"Error fetching from OpenAlex: {e}")
+                logger.error(f"Error fetching from OpenAlex (saved checkpoint at page {page}, items {len(all_results)}): {e}")
                 break
                 
         logger.info(f"OpenAlex fetch complete. Total papers retrieved: {len(all_results)}")

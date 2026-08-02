@@ -14,12 +14,28 @@ class SemanticScholarCollector:
         if api_key:
             self.headers["x-api-key"] = api_key
 
-    def fetch_papers(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None) -> pd.DataFrame:
-        """Fetches papers from Semantic Scholar with pagination."""
+    def fetch_papers(self, query: str, limit: int = 100, start_year: Optional[int] = None, end_year: Optional[int] = None, resume: bool = True) -> pd.DataFrame:
+        """Fetches papers from Semantic Scholar with pagination and automatic checkpoint recovery."""
+        from src.core.collectors.checkpoint import ScrapeCheckpointManager
+        checkpoint_mgr = ScrapeCheckpointManager()
+
         all_results = []
-        per_page = min(limit, 100)
+        received_pages = []
+        per_page = min(limit if limit > 0 else 100, 100)
         offset = 0
-        
+        page = 0
+
+        if resume:
+            checkpoint = checkpoint_mgr.load("semantic_scholar", query, start_year, end_year)
+            if checkpoint:
+                all_results = checkpoint.get("items", [])
+                received_pages = checkpoint.get("received_pages", [])
+                offset = checkpoint.get("offset", 0)
+                page = checkpoint.get("last_page", 0)
+                if checkpoint.get("is_complete") or (limit > 0 and len(all_results) >= limit):
+                    logger.info(f"Semantic Scholar fetch restored from checkpoint ({len(all_results)} items).")
+                    return self._to_dataframe(all_results[:limit] if limit > 0 else all_results)
+
         year_range = ""
         if start_year and end_year:
             year_range = f"{start_year}-{end_year}"
@@ -28,8 +44,8 @@ class SemanticScholarCollector:
         elif end_year:
             year_range = f"-{end_year}"
             
-        while offset < limit:
-            current_limit = min(per_page, limit - offset)
+        while limit <= 0 or offset < limit:
+            current_limit = min(per_page, limit - offset) if limit > 0 else per_page
             params = {
                 "query": query,
                 "limit": current_limit,
@@ -39,18 +55,27 @@ class SemanticScholarCollector:
             if year_range:
                 params["year"] = year_range
                 
-            logger.info(f"Fetching papers from Semantic Scholar (offset={offset}, limit={current_limit})")
+            page += 1
+            logger.info(f"Fetching papers from Semantic Scholar (Page {page}, offset={offset}, limit={current_limit})")
             try:
                 data = self._make_request(params)
                 results = data.get("data", [])
                 if not results:
+                    if resume:
+                        checkpoint_mgr.save("semantic_scholar", query, all_results, start_year, end_year, page=page, offset=offset, received_pages=received_pages, is_complete=True)
                     break
                 all_results.extend(results)
                 offset += len(results)
-                if len(results) < current_limit:
+                received_pages.append(page)
+
+                is_end = (len(results) < current_limit)
+                if resume:
+                    checkpoint_mgr.save("semantic_scholar", query, all_results, start_year, end_year, page=page, offset=offset, received_pages=received_pages, is_complete=is_end)
+
+                if is_end:
                     break
             except Exception as e:
-                logger.error(f"Error fetching from Semantic Scholar: {e}")
+                logger.error(f"Error fetching from Semantic Scholar (checkpoint saved at page {page}, offset {offset}): {e}")
                 break
                 
         return self._to_dataframe(all_results)
