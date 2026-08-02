@@ -88,12 +88,15 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8'))
             new_entries = {}
+            # To handle OpenAlex redirects/merges, we need to map returned IDs back to the requested IDs
+            # First create a map of original IDs to entries
+            returned_entries = {}
             for item in data.get("results", []):
-                wid = item.get("id", "").split("/")[-1].lower()
+                actual_wid = item.get("id", "").split("/")[-1].lower()
                 display_name = item.get("display_name", "")
                 yr = str(item.get("publication_year", ""))
                 authorships = item.get("authorships", [])
-                doi = item.get("doi", f"https://openalex.org/{wid.upper()}")
+                doi = item.get("doi", f"https://openalex.org/{actual_wid.upper()}")
 
                 display_name = display_name or "Unknown Title"
                 if authorships:
@@ -106,9 +109,19 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
                     words = display_name.split()
                     title_str = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
 
-                entry = (title_str, doi if doi else f"https://openalex.org/{wid.upper()}")
-                lookup[wid] = entry
-                new_entries[wid] = entry
+                entry = (title_str, doi if doi else f"https://openalex.org/{actual_wid.upper()}")
+                returned_entries[actual_wid] = entry
+
+                # Also check 'ids' field for merged/old IDs that we might have requested
+                for old_id_url in item.get("ids", {}).get("openalex", []):
+                    old_id = old_id_url.split("/")[-1].lower()
+                    returned_entries[old_id] = entry
+
+            # Now assign the found entries back to the original requested IDs
+            for req_id in missing[:50]:
+                if req_id in returned_entries:
+                    lookup[req_id] = returned_entries[req_id]
+                    new_entries[req_id] = returned_entries[req_id]
 
             if new_entries:
                 cache_path = os.path.join(output_dir, "data", "openalex_title_cache.json")
