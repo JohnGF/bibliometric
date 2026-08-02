@@ -83,7 +83,7 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
     try:
         chunk = [m.upper() for m in missing[:50]]
         pipe_ids = "|".join(chunk)
-        url = f"https://api.openalex.org/works?filter=openalex_id:{pipe_ids}&per_page=50"
+        url = f"https://api.openalex.org/works?filter=openalex:{pipe_ids}&per_page=50"
         req = urllib.request.Request(url, headers={"User-Agent": "BibliometricPipeline/1.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8'))
@@ -95,8 +95,10 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
                 authorships = item.get("authorships", [])
                 doi = item.get("doi", f"https://openalex.org/{wid.upper()}")
 
+                display_name = display_name or "Unknown Title"
                 if authorships:
-                    first_au = authorships[0].get("author", {}).get("display_name", "").split()[-1]
+                    author_name = authorships[0].get("author", {}).get("display_name", "")
+                    first_au = author_name.split()[-1] if author_name else "Unknown"
                     words = display_name.split()
                     short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
                     title_str = f"{first_au} et al. ({yr}) {short_t}" if yr else f"{first_au} et al. {short_t}"
