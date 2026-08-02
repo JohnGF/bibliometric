@@ -124,6 +124,37 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
                     lookup[req_id] = returned_entries[req_id]
                     new_entries[req_id] = returned_entries[req_id]
 
+            # Fallback for IDs that still failed in the batch query
+            still_missing = [m for m in missing[:50] if m not in new_entries]
+            for sm in still_missing:
+                try:
+                    url_single = f"https://api.openalex.org/works/{sm.upper()}"
+                    req_single = urllib.request.Request(url_single, headers={"User-Agent": "BibliometricPipeline/1.0"})
+                    with urllib.request.urlopen(req_single, timeout=5) as resp_single:
+                        item = json.loads(resp_single.read().decode('utf-8'))
+                        actual_wid = item.get("id", "").split("/")[-1].lower()
+                        display_name = item.get("display_name", "")
+                        yr = str(item.get("publication_year", ""))
+                        authorships = item.get("authorships", [])
+                        doi = item.get("doi", f"https://openalex.org/{actual_wid.upper()}")
+
+                        display_name = display_name or "Unknown Title"
+                        if authorships:
+                            author_name = authorships[0].get("author", {}).get("display_name", "")
+                            first_au = author_name.split()[-1] if author_name else "Unknown"
+                            words = display_name.split()
+                            short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
+                            title_str = f"{first_au} et al. ({yr}) {short_t}" if yr else f"{first_au} et al. {short_t}"
+                        else:
+                            words = display_name.split()
+                            title_str = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
+
+                        entry = (title_str, doi if doi else f"https://openalex.org/{actual_wid.upper()}")
+                        lookup[sm] = entry
+                        new_entries[sm] = entry
+                except Exception as ex:
+                    pass
+
             if new_entries:
                 cache_path = os.path.join(output_dir, "data", "openalex_title_cache.json")
                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)
