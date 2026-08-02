@@ -201,6 +201,9 @@ class UnifiedCollector:
         
         self._enrich_missing_metadata(deduplicated_df)
 
+        from src.core.ingestion import add_pdf_name_column
+        deduplicated_df = add_pdf_name_column(deduplicated_df)
+
         logger.info(f"Deduplication complete. Total unique papers: {len(deduplicated_df)}")
         return deduplicated_df.reset_index(drop=True)
 

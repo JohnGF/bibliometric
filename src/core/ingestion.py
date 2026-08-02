@@ -179,8 +179,48 @@ def extract_countries(affiliation: str) -> List[str]:
     return list(countries_found)
 
 
-# --- Data Loading ---
+def generate_pdf_name(row: dict) -> str:
+    """Option A: Generates clean human-memorable 'pdf_name' string (FirstAuthor et al. (Year) ShortTitle)."""
+    t_clean = str(row.get("Title", "")).strip() if pd.notnull(row.get("Title")) else ""
+    if not t_clean or t_clean.lower() in ("nan", "none", "unknown", "untitled publication"):
+        return "Publication"
 
+    if ":" in t_clean and len(t_clean.split(":")[0].split()) <= 5:
+        short_t = t_clean.split(":")[0].strip()
+    else:
+        words = t_clean.split()
+        short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
+
+    au_str = str(row.get("Authors", "")).strip() if pd.notnull(row.get("Authors")) else ""
+    first_author = ""
+    is_multi = False
+    if au_str and au_str.lower() not in ("nan", "none", "unknown"):
+        authors_list = [a.strip() for a in au_str.split(";") if a.strip()]
+        is_multi = len(authors_list) > 1
+        if authors_list:
+            raw_a = authors_list[0]
+            first_author = raw_a.split(",")[0].strip() if "," in raw_a else raw_a.split()[-1].strip()
+
+    yr_str = str(row.get("Year", "")).strip()[:4] if pd.notnull(row.get("Year")) and str(row.get("Year")).strip().lower() != "nan" else ""
+
+    if first_author and yr_str:
+        author_str = f"{first_author} et al." if is_multi else first_author
+        return f"{author_str} ({yr_str}) {short_t}"
+    elif first_author:
+        author_str = f"{first_author} et al." if is_multi else first_author
+        return f"{author_str} {short_t}"
+    elif yr_str:
+        return f"({yr_str}) {short_t}"
+    return short_t
+
+def add_pdf_name_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Appends 'pdf_name' column to publication dataset for seamless import into LaTeX tables."""
+    if df.empty or "pdf_name" in df.columns:
+        return df
+    df["pdf_name"] = df.apply(generate_pdf_name, axis=1)
+    return df
+
+# --- Data Loading ---
 
 def load_data(file_path: str) -> pd.DataFrame:
     if file_path.endswith(".csv"):
@@ -192,7 +232,7 @@ def load_data(file_path: str) -> pd.DataFrame:
     else:
         raise ValueError("Unsupported file format")
 
-    return df
+    return add_pdf_name_column(df)
 
 
 def validate_data(df: pd.DataFrame) -> List[PublicationSchema]:
