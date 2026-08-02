@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def export_llm_table(output_dir: str = "pipeline_results_37k", force: bool = False):
+def export_llm_table(output_dir: str = "pipeline_results", force: bool = False):
     """Generates annex_llm_screening.tex containing Ollama LLM Noise Taxonomy."""
     tables_dir = os.path.join(output_dir, "tables")
     os.makedirs(tables_dir, exist_ok=True)
@@ -71,5 +71,5 @@ def export_llm_table(output_dir: str = "pipeline_results_37k", force: bool = Fal
         f.write("% LLM Screening Annex\n\\subsection{LLM Screening Taxonomy}\n\\label{tab:llm_screening}\n")
 
 if __name__ == "__main__":
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results_37k"
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results"
     export_llm_table(out_dir, force=True)

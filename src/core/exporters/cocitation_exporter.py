@@ -126,7 +126,7 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
     except Exception as e:
         logger.warning(f"Could not fetch missing cited titles from OpenAlex API: {e}")
 
-def export_cocitation_tables(output_dir: str = "pipeline_results_37k", title_map: dict = None, style: str = "title", force: bool = False):
+def export_cocitation_tables(output_dir: str = "pipeline_results", title_map: dict = None, style: str = "title", force: bool = False):
     """Generates tab_top_references_pagerank.tex and annex_Label_Co_Citation.tex streaming 6.2GB CSV with Polars."""
     tables_dir = os.path.join(output_dir, "tables")
     os.makedirs(tables_dir, exist_ok=True)
@@ -250,5 +250,5 @@ if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     logging.basicConfig(level=logging.INFO, format="[+] %(message)s")
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results_37k"
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results"
     export_cocitation_tables(out_dir, force=True)

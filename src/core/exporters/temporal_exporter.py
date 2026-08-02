@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def export_temporal_table(output_dir: str = "pipeline_results_37k", force: bool = False):
+def export_temporal_table(output_dir: str = "pipeline_results", force: bool = False):
     """Generates annex_temporal_deltas.tex containing Scientific Market Share Deltas (Delta %)."""
     tables_dir = os.path.join(output_dir, "tables")
     os.makedirs(tables_dir, exist_ok=True)
@@ -72,5 +72,5 @@ def export_temporal_table(output_dir: str = "pipeline_results_37k", force: bool 
         f.write("% Temporal Deltas Annex\n\\subsection{Temporal Delta Shifts}\n\\label{tab:temporal_deltas}\n")
 
 if __name__ == "__main__":
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results_37k"
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results"
     export_temporal_table(out_dir, force=True)
