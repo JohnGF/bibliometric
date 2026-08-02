@@ -113,8 +113,9 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
                 returned_entries[actual_wid] = entry
 
                 # Also check 'ids' field for merged/old IDs that we might have requested
-                for old_id_url in item.get("ids", {}).get("openalex", []):
-                    old_id = old_id_url.split("/")[-1].lower()
+                openalex_id = item.get("ids", {}).get("openalex")
+                if isinstance(openalex_id, str):
+                    old_id = openalex_id.split("/")[-1].lower()
                     returned_entries[old_id] = entry
 
             # Now assign the found entries back to the original requested IDs
