@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def export_bertopic_table(output_dir: str = "pipeline_results_37k", force: bool = False):
+def export_bertopic_table(output_dir: str = "pipeline_results", force: bool = False):
     """Generates annex_bertopic_details.tex containing BERTopic Meta-Theme Taxonomy."""
     tables_dir = os.path.join(output_dir, "tables")
     os.makedirs(tables_dir, exist_ok=True)
@@ -64,5 +64,5 @@ def export_bertopic_table(output_dir: str = "pipeline_results_37k", force: bool 
         f.write("% BERTopic Details Annex\n\\subsection{BERTopic Details}\n\\label{tab:bertopic_clusters}\n")
 
 if __name__ == "__main__":
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results_37k"
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results"
     export_bertopic_table(out_dir, force=True)

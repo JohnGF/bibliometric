@@ -182,7 +182,7 @@ def build_dataset_title_lookup(output_dir: str) -> dict:
                 pass
     return lookup
 
-def export_coupling_tables(output_dir: str = "pipeline_results_37k", title_map: dict = None, style: str = "title", force: bool = False):
+def export_coupling_tables(output_dir: str = "pipeline_results", title_map: dict = None, style: str = "title", force: bool = False):
     """Generates tab_Biblio.tex and annex_Label_Bibliographic_Coupling.tex with human memorable paper names."""
     tables_dir = os.path.join(output_dir, "tables")
     os.makedirs(tables_dir, exist_ok=True)
@@ -292,5 +292,5 @@ if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     logging.basicConfig(level=logging.INFO, format="[+] %(message)s")
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results_37k"
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results"
     export_coupling_tables(out_dir, force=True)
