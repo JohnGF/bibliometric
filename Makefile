@@ -14,7 +14,7 @@ help:
 
 scaffold:
 	@echo "[+] Building IEEEtran Paper Scaffold..."
-	python scripts/build_paper_scaffold.py pipeline_results_37k
+	uv run python scripts/build_paper_scaffold.py pipeline_results_37k
 
 container-scaffold:
 	@echo "[+] Building IEEEtran Paper Scaffold via Container..."

@@ -83,20 +83,25 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
     try:
         chunk = [m.upper() for m in missing[:50]]
         pipe_ids = "|".join(chunk)
-        url = f"https://api.openalex.org/works?filter=openalex_id:{pipe_ids}&per_page=50"
+        url = f"https://api.openalex.org/works?filter=openalex:{pipe_ids}&per_page=50"
         req = urllib.request.Request(url, headers={"User-Agent": "BibliometricPipeline/1.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8'))
             new_entries = {}
+            # To handle OpenAlex redirects/merges, we need to map returned IDs back to the requested IDs
+            # First create a map of original IDs to entries
+            returned_entries = {}
             for item in data.get("results", []):
-                wid = item.get("id", "").split("/")[-1].lower()
+                actual_wid = item.get("id", "").split("/")[-1].lower()
                 display_name = item.get("display_name", "")
                 yr = str(item.get("publication_year", ""))
                 authorships = item.get("authorships", [])
-                doi = item.get("doi", f"https://openalex.org/{wid.upper()}")
+                doi = item.get("doi", f"https://openalex.org/{actual_wid.upper()}")
 
+                display_name = display_name or "Unknown Title"
                 if authorships:
-                    first_au = authorships[0].get("author", {}).get("display_name", "").split()[-1]
+                    author_name = authorships[0].get("author", {}).get("display_name", "")
+                    first_au = author_name.split()[-1] if author_name else "Unknown"
                     words = display_name.split()
                     short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
                     title_str = f"{first_au} et al. ({yr}) {short_t}" if yr else f"{first_au} et al. {short_t}"
@@ -104,9 +109,51 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
                     words = display_name.split()
                     title_str = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
 
-                entry = (title_str, doi if doi else f"https://openalex.org/{wid.upper()}")
-                lookup[wid] = entry
-                new_entries[wid] = entry
+                entry = (title_str, doi if doi else f"https://openalex.org/{actual_wid.upper()}")
+                returned_entries[actual_wid] = entry
+
+                # Also check 'ids' field for merged/old IDs that we might have requested
+                openalex_id = item.get("ids", {}).get("openalex")
+                if isinstance(openalex_id, str):
+                    old_id = openalex_id.split("/")[-1].lower()
+                    returned_entries[old_id] = entry
+
+            # Now assign the found entries back to the original requested IDs
+            for req_id in missing[:50]:
+                if req_id in returned_entries:
+                    lookup[req_id] = returned_entries[req_id]
+                    new_entries[req_id] = returned_entries[req_id]
+
+            # Fallback for IDs that still failed in the batch query
+            still_missing = [m for m in missing[:50] if m not in new_entries]
+            for sm in still_missing:
+                try:
+                    url_single = f"https://api.openalex.org/works/{sm.upper()}"
+                    req_single = urllib.request.Request(url_single, headers={"User-Agent": "BibliometricPipeline/1.0"})
+                    with urllib.request.urlopen(req_single, timeout=5) as resp_single:
+                        item = json.loads(resp_single.read().decode('utf-8'))
+                        actual_wid = item.get("id", "").split("/")[-1].lower()
+                        display_name = item.get("display_name", "")
+                        yr = str(item.get("publication_year", ""))
+                        authorships = item.get("authorships", [])
+                        doi = item.get("doi", f"https://openalex.org/{actual_wid.upper()}")
+
+                        display_name = display_name or "Unknown Title"
+                        if authorships:
+                            author_name = authorships[0].get("author", {}).get("display_name", "")
+                            first_au = author_name.split()[-1] if author_name else "Unknown"
+                            words = display_name.split()
+                            short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
+                            title_str = f"{first_au} et al. ({yr}) {short_t}" if yr else f"{first_au} et al. {short_t}"
+                        else:
+                            words = display_name.split()
+                            title_str = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
+
+                        entry = (title_str, doi if doi else f"https://openalex.org/{actual_wid.upper()}")
+                        lookup[sm] = entry
+                        new_entries[sm] = entry
+                except Exception as ex:
+                    pass
 
             if new_entries:
                 cache_path = os.path.join(output_dir, "data", "openalex_title_cache.json")
@@ -124,7 +171,7 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
     except Exception as e:
         logger.warning(f"Could not fetch missing cited titles from OpenAlex API: {e}")
 
-def export_cocitation_tables(output_dir: str = "pipeline_results_37k", title_map: dict = None, style: str = "title", force: bool = False):
+def export_cocitation_tables(output_dir: str = "pipeline_results", title_map: dict = None, style: str = "title", force: bool = False):
     """Generates tab_top_references_pagerank.tex and annex_Label_Co_Citation.tex streaming 6.2GB CSV with Polars."""
     tables_dir = os.path.join(output_dir, "tables")
     os.makedirs(tables_dir, exist_ok=True)
@@ -248,5 +295,5 @@ if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     logging.basicConfig(level=logging.INFO, format="[+] %(message)s")
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results_37k"
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results"
     export_cocitation_tables(out_dir, force=True)

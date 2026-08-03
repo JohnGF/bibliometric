@@ -26,7 +26,7 @@ def format_author_name(name_str: str) -> str:
         return f"{last}, {first_middle}"
     return name_str
 
-def export_author_table(output_dir: str = "pipeline_results_37k", force: bool = False):
+def export_author_table(output_dir: str = "pipeline_results", force: bool = False):
     """Generates annex_Author_Sidetable.tex containing Author Productivity and Key Network Metrics."""
     tables_dir = os.path.join(output_dir, "tables")
     os.makedirs(tables_dir, exist_ok=True)
@@ -108,5 +108,5 @@ def export_author_table(output_dir: str = "pipeline_results_37k", force: bool = 
         logger.info(f"Generated {fpath} with real author names!")
 
 if __name__ == "__main__":
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results_37k"
+    out_dir = sys.argv[1] if len(sys.argv) > 1 else "pipeline_results"
     export_author_table(out_dir, force=True)

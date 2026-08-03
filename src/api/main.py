@@ -7,7 +7,7 @@ from typing import Optional, List
 import os
 import logging
 import pandas as pd
-from src.pipeline import BibliometricPipeline
+from src.orchestrators.pipeline_manager import PipelineManager
 from src.core.collection import UnifiedCollector
 
 # Configure logging
@@ -26,7 +26,7 @@ app.add_middleware(
 )
 
 # Shared state
-pipeline = BibliometricPipeline(output_dir="pipeline_results")
+pipeline = PipelineManager(output_dir="pipeline_results")
 collector = UnifiedCollector()
 active_tasks = {}
 
