@@ -1,3 +1,4 @@
+import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 import polars as pl
@@ -9,10 +10,33 @@ class Visualization:
         sns.set_style(style)
         plt.rcParams["figure.figsize"] = (12, 7)
 
-    def plot_yearly_growth(self, df: pl.DataFrame, save_path: Optional[str] = None, max_year: int = 2024, min_year: int = 2014) -> Optional[pd.DataFrame]:
-        """Plots publication counts and YoY growth percentages for complete historical years."""
+    def plot_yearly_growth(self, df: pl.DataFrame, save_path: Optional[str] = None, max_year: Optional[int] = None, min_year: Optional[int] = None) -> Optional[pd.DataFrame]:
+        """Plots publication counts and YoY growth percentages for complete historical years.
+
+        The study window defaults to the date bounds in the query configuration
+        file (data/query.txt) and is always expanded to cover the actual data range.
+        """
         if df.is_empty():
             return None
+
+        # Derive year bounds from the query config, falling back to the data range.
+        from src.core.study_config import load_study_config
+        cfg = load_study_config()
+
+        data_years = df.select(pl.col("Year").cast(pl.Int64).drop_nulls())
+        data_min = int(data_years.min().item()) if not data_years.is_empty() else None
+        data_max = int(data_years.max().item()) if not data_years.is_empty() else None
+
+        if min_year is None:
+            min_year = cfg.get("start_year") or data_min
+        if max_year is None:
+            max_year = cfg.get("end_year") or data_max
+
+        # Never truncate the available data.
+        if data_min is not None and min_year is not None:
+            min_year = min(min_year, data_min)
+        if data_max is not None and max_year is not None:
+            max_year = max(max_year, data_max)
 
         # Filter complete historical years (excluding incomplete/future indexing artifacts > max_year)
         filtered_df = df.filter((pl.col("Year") >= min_year) & (pl.col("Year") <= max_year))
@@ -31,12 +55,27 @@ class Visualization:
         pdf["projected_len"] = pdf["len"]
         pdf["projected_growth_pct"] = pdf["growth_pct"]
 
+        # Mark the current calendar year as partial (YTD) since it is still in progress.
+        current_year = datetime.date.today().year
+        pdf["is_partial"] = pdf["Year"] == current_year
+        has_partial = bool(pdf["is_partial"].any())
+
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
         years = pdf["Year"].astype(str).tolist()
 
         # Plot 1: Counts
+        partial_labeled = False
+        observed_labeled = False
         for i, row in pdf.iterrows():
-            ax1.bar(years[i], row["len"], color='skyblue', label='Observed Publications' if i == 0 else "")
+            if row["is_partial"]:
+                label = "Partial Year (YTD)" if not partial_labeled else ""
+                partial_labeled = True
+                ax1.bar(years[i], row["len"], color='skyblue', edgecolor='black', linewidth=0.8,
+                        hatch='///', alpha=0.85, label=label)
+            else:
+                label = "Observed Publications" if not observed_labeled else ""
+                observed_labeled = True
+                ax1.bar(years[i], row["len"], color='skyblue', label=label)
             ax1.text(i, row["len"] + (row["len"] * 0.01), f'{int(row["len"]):,}', ha='center', va='bottom', fontsize=9, fontweight='bold')
 
         ax1.set_ylabel("Number of Publications", fontsize=11, fontweight='bold')
@@ -45,18 +84,31 @@ class Visualization:
         ax1.legend(loc="upper left")
 
         # Plot 2: YoY Growth Rate (%)
+        partial_labeled = False
         for i, row in pdf.iterrows():
             yval = row["growth_pct"]
             color = 'lightcoral' if yval >= 0 else 'lightskyblue'
-            ax2.bar(years[i], yval, color=color, edgecolor='black', linewidth=0.5)
+            if row["is_partial"]:
+                label = "Partial Year (YTD)" if not partial_labeled else ""
+                partial_labeled = True
+                ax2.bar(years[i], yval, color=color, edgecolor='black', linewidth=0.8,
+                        hatch='///', alpha=0.85, label=label)
+            else:
+                ax2.bar(years[i], yval, color=color, edgecolor='black', linewidth=0.5)
             offset = 0.5 if yval >= 0 else -2.5
-            ax2.text(i, yval + offset, f'{yval:+.1f}%', ha='center', va='bottom' if yval >= 0 else 'top', fontsize=9, fontweight='bold')
+            ytd_suffix = " (YTD)" if row["is_partial"] else ""
+            ax2.text(i, yval + offset, f'{yval:+.1f}%{ytd_suffix}', ha='center', va='bottom' if yval >= 0 else 'top', fontsize=9, fontweight='bold')
 
         ax2.set_ylabel("YoY Growth Rate (%)", fontsize=11, fontweight='bold')
         ax2.axhline(0, color='grey', linewidth=0.8, linestyle='--')
         ax2.grid(axis='y', linestyle='--', alpha=0.7)
+        ax2.legend(loc="best")
 
         plt.xticks(rotation=45)
+        if has_partial:
+            plt.figtext(0.5, 0.01,
+                        f"Note: {current_year} is still in progress and shown as a partial year (YTD).",
+                        ha='center', fontsize=9, style='italic', alpha=0.75)
         plt.tight_layout()
         
         if save_path:

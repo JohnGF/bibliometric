@@ -11,6 +11,7 @@ from .temporal_exporter import export_temporal_table
 from .country_exporter import export_country_table
 from .bertopic_exporter import export_bertopic_table
 from .method_application_exporter import export_method_application_table
+from .query_exporter import export_query_table
 
 __all__ = [
     "export_author_table",
@@ -22,4 +23,5 @@ __all__ = [
     "export_country_table",
     "export_bertopic_table",
     "export_method_application_table",
+    "export_query_table",
 ]

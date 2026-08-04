@@ -14,6 +14,7 @@ from src.core.exporters import (
     export_country_table,
     export_bertopic_table,
     export_method_application_table,
+    export_query_table,
 )
 
 class LaTeXExporter:
@@ -98,6 +99,7 @@ class LaTeXExporter:
         export_country_table(self.output_dir, force=force)
         export_bertopic_table(self.output_dir, force=force)
         export_method_application_table(self.output_dir, force=force)
+        export_query_table(self.output_dir, force=force)
 
     def export_paper_scaffold(self, title: str = "Automated Bibliometric Review"):
         """Generates ready-to-compile master paper_scaffold.tex template."""
