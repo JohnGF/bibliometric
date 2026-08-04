@@ -75,63 +75,27 @@ def build_dynamic_title_lookup(output_dir: str) -> dict:
 
 def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_dir: str):
     """Automatically queries OpenAlex API in batch for missing cited W... IDs and caches results."""
-    missing = [w.strip().lower() for w in w_ids if w.strip().lower() not in lookup and (w.startswith("W") or w.startswith("w"))]
+    missing = list(set([w.strip().lower().split("/")[-1] for w in w_ids if w.strip().lower() not in lookup and w.strip().split("/")[-1].lower().startswith("w")]))
     if not missing:
         return
 
     import urllib.request
+    new_entries = {}
+
     try:
-        chunk = [m.upper() for m in missing[:50]]
-        pipe_ids = "|".join(chunk)
-        url = f"https://api.openalex.org/works?filter=openalex:{pipe_ids}&per_page=50"
-        req = urllib.request.Request(url, headers={"User-Agent": "BibliometricPipeline/1.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            new_entries = {}
-            # To handle OpenAlex redirects/merges, we need to map returned IDs back to the requested IDs
-            # First create a map of original IDs to entries
-            returned_entries = {}
-            for item in data.get("results", []):
-                actual_wid = item.get("id", "").split("/")[-1].lower()
-                display_name = item.get("display_name", "")
-                yr = str(item.get("publication_year", ""))
-                authorships = item.get("authorships", [])
-                doi = item.get("doi", f"https://openalex.org/{actual_wid.upper()}")
+        # Process in chunks of 50
+        for i in range(0, len(missing), 50):
+            chunk = [m.upper() for m in missing[i:i+50]]
+            pipe_ids = "|".join(chunk)
+            url = f"https://api.openalex.org/works?filter=openalex:{pipe_ids}&per_page=50"
+            req = urllib.request.Request(url, headers={"User-Agent": "BibliometricPipeline/1.0"})
 
-                display_name = display_name or "Unknown Title"
-                if authorships:
-                    author_name = authorships[0].get("author", {}).get("display_name", "")
-                    first_au = author_name.split()[-1] if author_name else "Unknown"
-                    words = display_name.split()
-                    short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
-                    title_str = f"{first_au} et al. ({yr}) {short_t}" if yr else f"{first_au} et al. {short_t}"
-                else:
-                    words = display_name.split()
-                    title_str = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
-
-                entry = (title_str, doi if doi else f"https://openalex.org/{actual_wid.upper()}")
-                returned_entries[actual_wid] = entry
-
-                # Also check 'ids' field for merged/old IDs that we might have requested
-                openalex_id = item.get("ids", {}).get("openalex")
-                if isinstance(openalex_id, str):
-                    old_id = openalex_id.split("/")[-1].lower()
-                    returned_entries[old_id] = entry
-
-            # Now assign the found entries back to the original requested IDs
-            for req_id in missing[:50]:
-                if req_id in returned_entries:
-                    lookup[req_id] = returned_entries[req_id]
-                    new_entries[req_id] = returned_entries[req_id]
-
-            # Fallback for IDs that still failed in the batch query
-            still_missing = [m for m in missing[:50] if m not in new_entries]
-            for sm in still_missing:
-                try:
-                    url_single = f"https://api.openalex.org/works/{sm.upper()}"
-                    req_single = urllib.request.Request(url_single, headers={"User-Agent": "BibliometricPipeline/1.0"})
-                    with urllib.request.urlopen(req_single, timeout=5) as resp_single:
-                        item = json.loads(resp_single.read().decode('utf-8'))
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    # First create a map of original IDs to entries
+                    returned_entries = {}
+                    for item in data.get("results", []):
                         actual_wid = item.get("id", "").split("/")[-1].lower()
                         display_name = item.get("display_name", "")
                         yr = str(item.get("publication_year", ""))
@@ -150,24 +114,66 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
                             title_str = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
 
                         entry = (title_str, doi if doi else f"https://openalex.org/{actual_wid.upper()}")
-                        lookup[sm] = entry
-                        new_entries[sm] = entry
-                except Exception as ex:
-                    pass
+                        returned_entries[actual_wid] = entry
 
-            if new_entries:
-                cache_path = os.path.join(output_dir, "data", "openalex_title_cache.json")
-                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                existing = {}
-                if os.path.exists(cache_path):
-                    try:
-                        with open(cache_path, "r", encoding="utf-8") as f:
-                            existing = json.load(f)
-                    except Exception:
-                        pass
-                existing.update(new_entries)
-                with open(cache_path, "w", encoding="utf-8") as f:
-                    json.dump(existing, f, indent=2)
+                        # Also check 'ids' field for merged/old IDs that we might have requested
+                        openalex_id = item.get("ids", {}).get("openalex")
+                        if isinstance(openalex_id, str):
+                            old_id = openalex_id.split("/")[-1].lower()
+                            returned_entries[old_id] = entry
+
+                    # Now assign the found entries back to the original requested IDs
+                    for req_id in missing[i:i+50]:
+                        if req_id in returned_entries:
+                            lookup[req_id] = returned_entries[req_id]
+                            new_entries[req_id] = returned_entries[req_id]
+
+                    # Fallback for IDs that still failed in the batch query
+                    still_missing = [m for m in missing[i:i+50] if m not in new_entries]
+                    for sm in still_missing:
+                        try:
+                            url_single = f"https://api.openalex.org/works/{sm.upper()}"
+                            req_single = urllib.request.Request(url_single, headers={"User-Agent": "BibliometricPipeline/1.0"})
+                            with urllib.request.urlopen(req_single, timeout=5) as resp_single:
+                                item = json.loads(resp_single.read().decode('utf-8'))
+                                actual_wid = item.get("id", "").split("/")[-1].lower()
+                                display_name = item.get("display_name", "")
+                                yr = str(item.get("publication_year", ""))
+                                authorships = item.get("authorships", [])
+                                doi = item.get("doi", f"https://openalex.org/{actual_wid.upper()}")
+
+                                display_name = display_name or "Unknown Title"
+                                if authorships:
+                                    author_name = authorships[0].get("author", {}).get("display_name", "")
+                                    first_au = author_name.split()[-1] if author_name else "Unknown"
+                                    words = display_name.split()
+                                    short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
+                                    title_str = f"{first_au} et al. ({yr}) {short_t}" if yr else f"{first_au} et al. {short_t}"
+                                else:
+                                    words = display_name.split()
+                                    title_str = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
+
+                                entry = (title_str, doi if doi else f"https://openalex.org/{actual_wid.upper()}")
+                                lookup[sm] = entry
+                                new_entries[sm] = entry
+                        except Exception as ex:
+                            pass
+            except Exception as e:
+                logger.warning(f"Batch query failed for chunk: {e}")
+
+        if new_entries:
+            cache_path = os.path.join(output_dir, "data", "openalex_title_cache.json")
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            existing = {}
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                except Exception:
+                    pass
+            existing.update(new_entries)
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=2)
     except Exception as e:
         logger.warning(f"Could not fetch missing cited titles from OpenAlex API: {e}")
 
@@ -192,48 +198,93 @@ def export_cocitation_tables(output_dir: str = "pipeline_results", title_map: di
         logger.info(f"Scanning {cocit_csv} using Polars fast lazy engine...")
         lazy_df = pl.scan_csv(cocit_csv)
 
-        # 1. Compute top 20 cited references in sub-second speed using Polars
+        # 1. Compute top 200 cited references in sub-second speed using Polars (to gather candidates)
         c1 = lazy_df.group_by("cited_1").agg(pl.col("co_citation_count").sum().alias("count")).rename({"cited_1": "cited"})
         c2 = lazy_df.group_by("cited_2").agg(pl.col("co_citation_count").sum().alias("count")).rename({"cited_2": "cited"})
-        top_20_df = pl.concat([c1, c2]).group_by("cited").agg(pl.col("count").sum()).sort("count", descending=True).limit(20).collect()
+        top_cand_df = pl.concat([c1, c2]).group_by("cited").agg(pl.col("count").sum()).sort("count", descending=True).limit(200).collect()
 
-        # 2. Extract top 25 co-citation pairs for Annex table
-        top_annex_df = lazy_df.sort("co_citation_count", descending=True).limit(25).collect().to_pandas()
+        # 2. Extract top 200 co-citation pairs for Annex table candidates
+        top_annex_cand_df = lazy_df.sort("co_citation_count", descending=True).limit(200).collect().to_pandas()
 
         dataset_lookup = build_dynamic_title_lookup(output_dir)
-        fetch_and_cache_missing_openalex_titles([str(x) for x in top_20_df["cited"]], dataset_lookup, output_dir)
+
+        # Collect all unique IDs from candidates to fetch
+        all_candidate_ids = set()
+        for x in top_cand_df["cited"]:
+            all_candidate_ids.add(str(x))
+        for _, r in top_annex_cand_df.iterrows():
+            all_candidate_ids.add(str(r['cited_1']))
+            all_candidate_ids.add(str(r['cited_2']))
+
+        fetch_and_cache_missing_openalex_titles(list(all_candidate_ids), dataset_lookup, output_dir)
+
+        rejected_ids = set()
+
+        # Filter top 20 main table candidates
+        valid_top_20 = []
+        for row in top_cand_df.to_dicts():
+            ref_id = str(row["cited"]).strip()
+            cnt = int(row["count"])
+            clean_id = ref_id.replace("https://doi.org/", "").replace("https://openalex.org/", "").strip().lower()
+
+            if clean_id in dataset_lookup:
+                valid_top_20.append((ref_id, cnt, clean_id))
+            else:
+                rejected_ids.add(ref_id)
+
+            if len(valid_top_20) >= 20:
+                break
+
+        # Filter top 25 annex table candidates
+        valid_annex = []
+        for _, r in top_annex_cand_df.iterrows():
+            c1_val = str(r['cited_1']).strip()
+            c2_val = str(r['cited_2']).strip()
+            cnt = int(r['co_citation_count'])
+
+            clean1 = c1_val.replace("https://doi.org/", "").replace("https://openalex.org/", "").strip().lower()
+            clean2 = c2_val.replace("https://doi.org/", "").replace("https://openalex.org/", "").strip().lower()
+
+            if clean1 in dataset_lookup and clean2 in dataset_lookup:
+                valid_annex.append((c1_val, c2_val, cnt, clean1, clean2))
+            else:
+                if clean1 not in dataset_lookup:
+                    rejected_ids.add(c1_val)
+                if clean2 not in dataset_lookup:
+                    rejected_ids.add(c2_val)
+
+            if len(valid_annex) >= 25:
+                break
+
+        # Write rejected references to a CSV
+        reject_file = os.path.join(output_dir, "data", "unresolved_references_reject.csv")
+        os.makedirs(os.path.dirname(reject_file), exist_ok=True)
+        with open(reject_file, "w", encoding="utf-8") as rf:
+            rf.write("rejected_id\n")
+            for rid in rejected_ids:
+                rf.write(f"{rid}\n")
+        logger.info(f"Exported {len(rejected_ids)} unresolved reference IDs to {reject_file}")
 
         # Build Main Table III
         tex = []
-        tex.append("\\begin{table}[htbp]")
-        tex.append("\\caption{Top 20 Most Referenced Landmark Publications}")
-        tex.append("\\label{tab:top_references_pagerank}")
-        tex.append("\\footnotesize")
-        tex.append("\\begin{tabular}{p{0.75\\linewidth} r}")
-        tex.append("\\toprule")
-        tex.append("\\textbf{Landmark Reference Publication} & \\textbf{Citations} \\\\")
-        tex.append("\\midrule")
+        tex.append(r"\begin{table}[htbp]")
+        tex.append(r"\caption{Top 20 Most Referenced Landmark Publications}")
+        tex.append(r"\label{tab:top_references_pagerank}")
+        tex.append(r"\footnotesize")
+        tex.append(r"\begin{tabular}{p{0.75\linewidth} r}")
+        tex.append(r"\toprule")
+        tex.append(r"\textbf{Landmark Reference Publication} & \textbf{Citations} \\")
+        tex.append(r"\midrule")
 
-        for row in top_20_df.to_dicts():
-            ref_id = str(row["cited"]).strip()
-            cnt = int(row["count"])
-
-            clean_id = ref_id.replace("https://doi.org/", "").replace("https://openalex.org/", "").strip().lower()
-            url = f"https://doi.org/{clean_id}" if clean_id.startswith("10.") else f"https://openalex.org/{clean_id}"
-
-            if clean_id in dataset_lookup:
-                title, url = dataset_lookup[clean_id]
-            else:
-                short_ref = clean_id.replace("10.1109/", "").replace("10.1016/", "").replace("j.", "")
-                title = f"Landmark Reference ({short_ref[:20]})"
-
-            clean_t = title.replace("&", "\\&").replace("_", "\\_").replace("#", "\\#").replace("%", "\\%")
+        for ref_id, cnt, clean_id in valid_top_20:
+            title, url = dataset_lookup[clean_id]
+            clean_t = title.replace("&", r"\&").replace("_", r"\_").replace("#", r"\#").replace("%", r"\%")
             link_str = f"\\href{{{url}}}{{{clean_t}}}"
             tex.append(f"{link_str} & {cnt:,} \\\\")
 
-        tex.append("\\bottomrule")
-        tex.append("\\end{tabular}")
-        tex.append("\\end{table}")
+        tex.append(r"\bottomrule")
+        tex.append(r"\end{tabular}")
+        tex.append(r"\end{table}")
 
         with open(t1, "w", encoding="utf-8") as f:
             f.write("\n".join(tex))
@@ -242,45 +293,29 @@ def export_cocitation_tables(output_dir: str = "pipeline_results", title_map: di
 
         # Build Annex Table IV
         atex = []
-        atex.append("\\subsection{Co-Citation Document Pairs \\& Shared Reference Network}")
-        atex.append("\\begin{table}[htbp]")
-        atex.append("\\caption{Co-Cited Document Pair Mapping}")
-        atex.append("\\label{tab:CoCitationLabels}")
-        atex.append("\\scriptsize")
-        atex.append("\\begin{tabular}{p{0.42\\linewidth} p{0.42\\linewidth} r}")
-        atex.append("\\toprule")
-        atex.append("\\textbf{Cited Reference 1} & \\textbf{Cited Reference 2} & \\textbf{Co-Citations} \\\\")
-        atex.append("\\midrule")
+        atex.append(r"\subsection{Co-Citation Document Pairs \& Shared Reference Network}")
+        atex.append(r"\begin{table}[htbp]")
+        atex.append(r"\caption{Co-Cited Document Pair Mapping}")
+        atex.append(r"\label{tab:CoCitationLabels}")
+        atex.append(r"\scriptsize")
+        atex.append(r"\begin{tabular}{p{0.42\linewidth} p{0.42\linewidth} r}")
+        atex.append(r"\toprule")
+        atex.append(r"\textbf{Cited Reference 1} & \textbf{Cited Reference 2} & \textbf{Co-Citations} \\")
+        atex.append(r"\midrule")
 
-        for _, r in top_annex_df.iterrows():
-            c1_val = str(r['cited_1']).strip()
-            c2_val = str(r['cited_2']).strip()
-            cnt = int(r['co_citation_count'])
+        for c1_val, c2_val, cnt, clean1, clean2 in valid_annex:
+            t1_str, u1_str = dataset_lookup[clean1]
+            t2_str, u2_str = dataset_lookup[clean2]
 
-            clean1 = c1_val.replace("https://doi.org/", "").replace("https://openalex.org/", "").strip().lower()
-            clean2 = c2_val.replace("https://doi.org/", "").replace("https://openalex.org/", "").strip().lower()
-
-            if clean1 in dataset_lookup:
-                t1_str, u1_str = dataset_lookup[clean1]
-            else:
-                t1_str = f"Reference ({clean1[:20]})"
-                u1_str = f"https://openalex.org/{clean1}"
-
-            if clean2 in dataset_lookup:
-                t2_str, u2_str = dataset_lookup[clean2]
-            else:
-                t2_str = f"Reference ({clean2[:20]})"
-                u2_str = f"https://openalex.org/{clean2}"
-
-            cl1 = str(t1_str).replace("&", "\\&").replace("_", "\\_").replace("#", "\\#").replace("%", "\\%")
-            cl2 = str(t2_str).replace("&", "\\&").replace("_", "\\_").replace("#", "\\#").replace("%", "\\%")
+            cl1 = str(t1_str).replace("&", r"\&").replace("_", r"\_").replace("#", r"\#").replace("%", r"\%")
+            cl2 = str(t2_str).replace("&", r"\&").replace("_", r"\_").replace("#", r"\#").replace("%", r"\%")
             s1_link = f"\\href{{{u1_str}}}{{{cl1}}}"
             s2_link = f"\\href{{{u2_str}}}{{{cl2}}}"
             atex.append(f"{s1_link} & {s2_link} & {cnt:,} \\\\")
 
-        atex.append("\\bottomrule")
-        atex.append("\\end{tabular}")
-        atex.append("\\end{table}")
+        atex.append(r"\bottomrule")
+        atex.append(r"\end{tabular}")
+        atex.append(r"\end{table}")
 
         with open(t2, "w", encoding="utf-8") as f:
             f.write("\n".join(atex))
