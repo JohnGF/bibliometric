@@ -83,7 +83,7 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
     try:
         chunk = [m.upper() for m in missing[:50]]
         pipe_ids = "|".join(chunk)
-        url = f"https://api.openalex.org/works?filter=openalex:{pipe_ids}&per_page=50"
+        url = f"https://api.openalex.org/works?filter=ids.openalex:{pipe_ids}&per_page=50"
         req = urllib.request.Request(url, headers={"User-Agent": "BibliometricPipeline/1.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8'))
@@ -128,10 +128,15 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
             still_missing = [m for m in missing[:50] if m not in new_entries]
             for sm in still_missing:
                 try:
-                    url_single = f"https://api.openalex.org/works/{sm.upper()}"
+                    url_single = f"https://api.openalex.org/works?filter=ids.openalex:{sm.upper()}"
                     req_single = urllib.request.Request(url_single, headers={"User-Agent": "BibliometricPipeline/1.0"})
                     with urllib.request.urlopen(req_single, timeout=5) as resp_single:
-                        item = json.loads(resp_single.read().decode('utf-8'))
+                        res = json.loads(resp_single.read().decode('utf-8'))
+                        if not res.get("results"):
+                            lookup[sm] = (f"Reference {sm.upper()}", f"https://openalex.org/{sm.upper()}")
+                            new_entries[sm] = lookup[sm]
+                            continue
+                        item = res["results"][0]
                         actual_wid = item.get("id", "").split("/")[-1].lower()
                         display_name = item.get("display_name", "")
                         yr = str(item.get("publication_year", ""))
@@ -154,6 +159,10 @@ def fetch_and_cache_missing_openalex_titles(w_ids: list, lookup: dict, output_di
                         new_entries[sm] = entry
                 except Exception as ex:
                     pass
+
+                if sm not in lookup:
+                    lookup[sm] = (f"Reference {sm.upper()}", f"https://openalex.org/{sm.upper()}")
+                    new_entries[sm] = lookup[sm]
 
             if new_entries:
                 cache_path = os.path.join(output_dir, "data", "openalex_title_cache.json")

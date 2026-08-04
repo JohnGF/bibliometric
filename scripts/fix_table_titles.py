@@ -84,24 +84,34 @@ def load_title_lookup(output_dir="pipeline_results_37k"):
     return lookup
 
 def fetch_openalex_title(wid):
-    url = f"https://api.openalex.org/works/{wid}"
+    # Query via filter to allow OpenAlex to handle merged/redirected IDs automatically
+    url = f"https://api.openalex.org/works?filter=ids.openalex:{wid.upper()}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "BibliometricPipeline/1.0"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode('utf-8'))
-            title = data.get("display_name", "")
-            authors = data.get("authorships", [])
-            year = data.get("publication_year", "")
+            results = data.get("results", [])
+            if not results:
+                return f"Reference {wid.upper()}"
+
+            work = results[0]
+            title = work.get("display_name", "")
+            if not title:
+                return f"Reference {wid.upper()}"
+
+            authors = work.get("authorships", [])
+            year = work.get("publication_year", "")
             
             if authors:
                 first_author = authors[0].get("author", {}).get("display_name", "").split()[-1]
                 words = title.split()
                 short_t = " ".join(words[:4]) + ("..." if len(words) > 4 else "")
                 return f"{first_author} et al. ({year}) {short_t}"
+
             words = title.split()
             return " ".join(words[:5]) + ("..." if len(words) > 5 else "")
-    except Exception:
-        return f"Reference {wid}"
+    except Exception as e:
+        return f"Reference {wid.upper()}"
 
 def fix_latex_tables(output_dir="pipeline_results_37k"):
     print(f"[+] Loading title lookup for hyperlinked table titles in {output_dir}...")
@@ -127,14 +137,14 @@ def fix_latex_tables(output_dir="pipeline_results_37k"):
             raw_title = match.group(2)
             
             # Check if title is generic or raw ID
-            if "Paper W" in raw_title or "Reference W" in raw_title or raw_title.startswith("W") or "10." in raw_title or "DOI:" in raw_title:
+            if "paper w" in raw_title.lower() or "reference w" in raw_title.lower() or "reference (w" in raw_title.lower() or raw_title.lower().startswith("w") or "10." in raw_title or "doi:" in raw_title.lower():
                 raw_id = url.rstrip("/").split("/")[-1]
                 if raw_id in lookup:
                     t_info = lookup[raw_id]
                     clean_t = t_info["title"]
                 elif url in lookup:
                     clean_t = lookup[url]["title"]
-                elif raw_id.startswith("W"):
+                elif raw_id.lower().startswith("w"):
                     clean_t = fetch_openalex_title(raw_id)
                     lookup[raw_id] = {"title": clean_t, "url": url}
                 else:
