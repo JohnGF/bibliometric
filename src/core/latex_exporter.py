@@ -167,7 +167,7 @@ class LaTeXExporter:
         tex.append("\\begin{figure}[htbp]")
         tex.append("    \\centering")
         tex.append("    \\IfFileExists{figures/Figure_22.pdf}{\\includegraphics[width=0.85\\linewidth]{Figure_22.pdf}}{\\IfFileExists{Figure_22.pdf}{\\includegraphics[width=0.85\\linewidth]{Figure_22.pdf}}{}}")
-        tex.append("    \\caption{Ollama LLM Classification of EEG Noise Treatment Paradigms}")
+        tex.append("    \\caption{Ollama LLM Noise Treatment Paradigm Classification}")
         tex.append("    \\label{fig:llm_noise_paradigm}")
         tex.append("\\end{figure}")
         tex.append("")
