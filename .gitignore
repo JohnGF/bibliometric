@@ -54,8 +54,11 @@ pipeline_results*/
 pipeline_*_results/
 outputs/
 output/
+test_output/
 *.parquet
 *.log
+*.csv
+*.txt
 
 # Generated Media & Report Export Formats
 *.pdf

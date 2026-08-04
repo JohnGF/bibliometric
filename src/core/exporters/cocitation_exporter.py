@@ -26,7 +26,6 @@ def build_dynamic_title_lookup(output_dir: str) -> dict:
     search_files = [
         os.path.join(output_dir, "data", "publication_dataset.csv"),
         os.path.join(output_dir, "publication_dataset.csv"),
-        os.path.join("data", "collected_EEG_master_merged.csv"),
     ]
 
     for fpath in search_files:

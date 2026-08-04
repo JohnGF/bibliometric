@@ -19,7 +19,8 @@ def export_temporal_table(output_dir: str = "pipeline_results", force: bool = Fa
     if not os.path.exists(pub_csv):
         pub_csv = os.path.join(output_dir, "publication_dataset.csv")
     if not os.path.exists(pub_csv):
-        pub_csv = os.path.join("data", "collected_EEG_master_merged.csv")
+        logger.warning(f"Could not find publication dataset in {output_dir}; returning empty.")
+        return
 
     if os.path.exists(pub_csv):
         try:
@@ -33,7 +34,7 @@ def export_temporal_table(output_dir: str = "pipeline_results", force: bool = Fa
                     kws = str(r["Author Keywords"]).split(";")
                     for k in kws:
                         k_clean = k.strip().lower()
-                        if k_clean and "eeg" not in k_clean:
+                        if k_clean:
                             records.append({"Keyword": k_clean, "Year": yr})
                 kdf = pd.DataFrame(records)
                 delta_df = tda.compute_temporal_deltas(kdf, category_col="Keyword", year_col="Year")

@@ -23,7 +23,8 @@ def export_keywords_table(output_dir: str = "pipeline_results", force: bool = Fa
     if not os.path.exists(pub_csv):
         pub_csv = os.path.join(output_dir, "publication_dataset.csv")
     if not os.path.exists(pub_csv):
-        pub_csv = os.path.join("data", "collected_EEG_master_merged.csv")
+        logger.warning(f"Could not find publication dataset in {output_dir}; returning empty.")
+        return
 
     kw_rows = []
     if os.path.exists(cagr_csv):

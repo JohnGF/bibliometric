@@ -30,7 +30,9 @@ class AnalysisOrchestrator:
 
     def __init__(self, output_dir: str, config: dict):
         self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
+        self.figures_dir = os.path.join(output_dir, "figures")
+        os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.figures_dir, exist_ok=True)
         self.config = config
 
         theme = self.config.get("theme", "whitegrid")
@@ -70,7 +72,7 @@ class AnalysisOrchestrator:
                     percolation_df.to_csv(os.path.join(self.output_dir, "percolation_results.csv"), index=False)
                     self.viz.plot_percolation(
                         percolation_df, 'co_citation_count',
-                        save_path=os.path.join(self.output_dir, "percolation_analysis.pdf")
+                        save_path=os.path.join(self.figures_dir, "percolation_analysis.pdf")
                     )
             except Exception as e:
                 logger.exception(f"Error during percolation analysis: {e}")
@@ -95,9 +97,10 @@ class AnalysisOrchestrator:
 
         # 1. Growth
         if self._should_run("growth", False):
+            print("\n>>> [STAGE 3.1] Yearly Growth & Projections - Generating growth charts and temporal data...")
             t_stage = time.time()
             logger.info("Generating yearly growth charts and projections...")
-            growth_df = self.viz.plot_yearly_growth(df, save_path=os.path.join(self.output_dir, "yearly_growth.pdf"))
+            growth_df = self.viz.plot_yearly_growth(df, save_path=os.path.join(self.figures_dir, "yearly_growth.pdf"))
             if growth_df is not None and not growth_df.empty:
                 growth_df.to_csv(os.path.join(self.output_dir, "yearly_growth.csv"), index=False)
                 total_pubs = int(growth_df["len"].sum())
@@ -116,12 +119,13 @@ class AnalysisOrchestrator:
 
         # 2. Country
         if self._should_run("country", self.config.get("skip_country", False)) and "Affiliations" in df_pd.columns:
+            print("\n>>> [STAGE 3.2] Country Evolution - Parsing author affiliations and mapping world distribution...")
             t_stage = time.time()
             exploded_pub, country_ev = self.country_analyzer.process_countries(df)
             if not country_ev.empty:
                 country_ev.to_csv(os.path.join(self.output_dir, "country_evolution.csv"), index=False)
-                self.viz.plot_country_evolution(country_ev, top_n=top_n_countries, save_path=os.path.join(self.output_dir, "country_evolution.pdf"))
-                self.viz.plot_country_choropleth_map(country_ev, save_path=os.path.join(self.output_dir, "country_world_map.pdf"))
+                self.viz.plot_country_evolution(country_ev, top_n=top_n_countries, save_path=os.path.join(self.figures_dir, "country_evolution.pdf"))
+                self.viz.plot_country_choropleth_map(country_ev, save_path=os.path.join(self.figures_dir, "country_world_map.pdf"))
                 country_totals = country_ev.groupby("Country")["Count"].sum().sort_values(ascending=False)
                 top_5 = country_totals.head(5)
                 top_5_str = ", ".join([f"{c} ({int(cnt):,})" for c, cnt in top_5.items()])
@@ -135,6 +139,7 @@ class AnalysisOrchestrator:
 
         # 3. Keyword CAGR
         if self._should_run("cagr", self.config.get("skip_cagr", False)) and "Author Keywords" in df_pd.columns:
+            print("\n>>> [STAGE 3.3] Keyword CAGR Analysis - Evaluating topic growth rates and compound trends...")
             t_stage = time.time()
             try:
                 kw_df = self.nlp.preprocess_keywords(df, column="Author Keywords")
@@ -144,7 +149,7 @@ class AnalysisOrchestrator:
                     if not cagr_df.is_empty():
                         cagr_pandas = cagr_df.to_pandas()
                         cagr_pandas.to_csv(os.path.join(self.output_dir, "keywords_cagr.csv"), index=False)
-                        self.viz.plot_keywords_cagr(cagr_pandas, save_path=os.path.join(self.output_dir, "keywords_cagr.pdf"))
+                        self.viz.plot_keywords_cagr(cagr_pandas, save_path=os.path.join(self.figures_dir, "keywords_cagr.pdf"))
                         top_5_cagr = cagr_pandas.nlargest(5, "cagr_percent")
                         top_5_kw_str = ", ".join([f"{r['standardized_word']} (+{r['cagr_percent']:.1f}%)" for _, r in top_5_cagr.iterrows()])
                         bullets = [
@@ -154,10 +159,12 @@ class AnalysisOrchestrator:
                         ]
                         _print_stage_summary("Keyword CAGR Analysis", bullets, elapsed_sec=time.time() - t_stage)
             except Exception as e:
+                print(f">>> [ERROR] Failed to run keyword CAGR analysis: {e}")
                 logger.error(f"Failed to run keyword CAGR analysis: {e}")
 
         # 4. NLP
         if self._should_run("nlp", self.config.get("skip_nlp", False)):
+            print("\n>>> [STAGE 3.4] Topic Modeling - Running BERTopic clustering and theme extraction...")
             t_stage = time.time()
             docs = df["Abstract"].drop_nulls().to_list()
             if len(docs) >= 10:
@@ -165,7 +172,7 @@ class AnalysisOrchestrator:
                 topic_info = self.nlp.get_topics()
                 if topic_info is not None:
                     topic_info.to_csv(os.path.join(self.output_dir, "topic_info.csv"), index=False)
-                    self.viz.plot_topic_distribution(topic_info, save_path=os.path.join(self.output_dir, "topic_word_scores.pdf"))
+                    self.viz.plot_topic_distribution(topic_info, save_path=os.path.join(self.figures_dir, "topic_word_scores.pdf"))
 
                 research_lines = self.nlp.get_research_lines(nr_clusters=5)
                 if not research_lines.empty:
@@ -183,10 +190,12 @@ class AnalysisOrchestrator:
                     ]
                     _print_stage_summary("Topic Modeling (BERTopic)", bullets, elapsed_sec=time.time() - t_stage)
             else:
+                print(">>> [WARNING] Too few abstracts for BERTopic (minimum 10 required). Skipping Stage 3.4.")
                 logger.warning("Too few abstracts for BERTopic.")
 
         # 5. Network
         if self._should_run("network", self.config.get("skip_network", False)):
+            print("\n>>> [STAGE 3.5] Co-Authorship Network - Constructing collaborator graphs and communities...")
             t_stage = time.time()
             edges_df, node_meta = self.network.build_co_authorship_graph(df)
 
@@ -204,8 +213,8 @@ class AnalysisOrchestrator:
 
             if not edges_df.empty and not node_meta.empty:
                 top_per_comm = self.config.get("top_per_community", 1)
-                self.viz.plot_network(edges_df, node_meta, save_path=os.path.join(self.output_dir, "network_graph.pdf"), top_per_community=top_per_comm)
-                self.viz.plot_circular_community_network(edges_df, node_meta, save_path=os.path.join(self.output_dir, "network_circular_chord.pdf"), top_per_community=top_per_comm)
+                self.viz.plot_network(edges_df, node_meta, save_path=os.path.join(self.figures_dir, "network_graph.pdf"), top_per_community=top_per_comm)
+                self.viz.plot_circular_community_network(edges_df, node_meta, save_path=os.path.join(self.figures_dir, "network_circular_chord.pdf"), top_per_community=top_per_comm)
                 num_nodes = len(node_meta)
                 num_edges = len(edges_df)
                 num_comms = node_meta['partition'].nunique() if 'partition' in node_meta.columns else 0
@@ -225,6 +234,7 @@ class AnalysisOrchestrator:
 
         # 6. Co-Citation
         if self._should_run("cocitation", False):
+            print("\n>>> [STAGE 3.6] Co-Citation Network - Processing reference coupling and citation paths...")
             t_stage = time.time()
             ref_df = None
             if refs_path and os.path.exists(refs_path):
@@ -248,7 +258,7 @@ class AnalysisOrchestrator:
                             if doi:
                                 title_map[doi] = {"title": t, "url": url}
 
-                    self.viz.plot_cocitation_network(cocit_df, title_map=title_map, save_path=os.path.join(self.output_dir, "cocitation_graph.pdf"))
+                    self.viz.plot_cocitation_network(cocit_df, title_map=title_map, save_path=os.path.join(self.figures_dir, "cocitation_graph.pdf"))
                     self.last_cocit_df, self.last_sparse_X, self.last_ref_df = cocit_df, X, ref_df
                     top_pair = cocit_df.iloc[0]
                     bullets = [
@@ -261,6 +271,7 @@ class AnalysisOrchestrator:
 
         # 7. Coupling
         if self._should_run("coupling", False) and self.last_sparse_X is not None and self.last_ref_df is not None:
+            print("\n>>> [STAGE 3.7] Bibliographic Coupling - Mapping source intersections...")
             t_stage = time.time()
             df_clean = self.last_ref_df[['source', 'destination']].dropna().drop_duplicates(subset=['source', 'destination'])
             _, source_uniques = pd.factorize(df_clean['source'])
@@ -275,6 +286,7 @@ class AnalysisOrchestrator:
 
         # 8. Percolation
         if self._should_run("percolation", self.config.get("skip_percolation", False)):
+            print("\n>>> [STAGE 3.8] Percolation Threshold Analysis - Evaluating network resilience...")
             t_stage = time.time()
             edges_for_perc = self.last_edges_df
             if edges_for_perc is None and os.path.exists(os.path.join(self.output_dir, "network_edges.csv")):
@@ -288,7 +300,7 @@ class AnalysisOrchestrator:
                 percolation_df = self.citation_analyzer.perform_percolation_analysis(edges_for_perc, s_col, d_col, w_col)
                 if not percolation_df.empty:
                     percolation_df.to_csv(os.path.join(self.output_dir, "percolation_results.csv"), index=False)
-                    self.viz.plot_percolation(percolation_df, w_col, save_path=os.path.join(self.output_dir, "percolation_analysis.pdf"))
+                    self.viz.plot_percolation(percolation_df, w_col, save_path=os.path.join(self.figures_dir, "percolation_analysis.pdf"))
                     num_steps = len(percolation_df)
                     max_lcc_pct = percolation_df['lcc_nodes_percentage_of_filtered'].max() if 'lcc_nodes_percentage_of_filtered' in percolation_df.columns else 0.0
                     bullets = [
@@ -298,5 +310,59 @@ class AnalysisOrchestrator:
                     ]
                     _print_stage_summary("Percolation Analysis", bullets, elapsed_sec=time.time() - t_stage)
 
+        # 9. Supplementary scaffold figures (query-neutral, generated so the
+        #    compiled document always includes every figure referenced by the
+        #    IEEEtran scaffold).
+        print("\n>>> [STAGE 3.9] Generating Supplementary Scaffold Figures...")
+        self._generate_supplementary_figures(df_pd)
+
         total_elapsed = time.time() - t_pipeline_start
+        print(f"\n>>> [ANALYSIS STAGE COMPLETE] Main analytical routines finished in {total_elapsed:.2f} seconds.")
         logger.info(f"Analysis complete in {total_elapsed:.2f}s.")
+
+    def _generate_supplementary_figures(self, df_pd: pd.DataFrame):
+        """Regenerates temporal delta, LLM paradigm, and method x application figures."""
+        from src.core.temporal_delta import TemporalDeltaAnalysis
+
+        # Temporal delta shifts (Author Keywords + Year)
+        if "Author Keywords" in df_pd.columns and "Year" in df_pd.columns:
+            try:
+                records = []
+                for _, r in df_pd.dropna(subset=["Author Keywords", "Year"]).iterrows():
+                    yr = int(r["Year"])
+                    for k in str(r["Author Keywords"]).split(";"):
+                        k_clean = k.strip().lower()
+                        if k_clean:
+                            records.append({"Keyword": k_clean, "Year": yr})
+                kdf = pd.DataFrame(records)
+                if not kdf.empty:
+                    delta_df = TemporalDeltaAnalysis().compute_temporal_deltas(
+                        kdf, category_col="Keyword", year_col="Year"
+                    )
+                    if delta_df is not None and not delta_df.empty:
+                        self.viz.plot_temporal_delta_shifts(
+                            delta_df,
+                            title_suffix="Research Focus Areas",
+                            save_path=os.path.join(self.figures_dir, "temporal_delta_shifts.pdf"),
+                        )
+                        logger.info("Generated temporal_delta_shifts.pdf")
+            except Exception as e:
+                logger.warning(f"Could not generate temporal delta shifts figure: {e}")
+
+        # LLM noise treatment paradigm taxonomy (Title/Abstract heuristics)
+        try:
+            self.viz.plot_llm_noise_paradigm(
+                df_pd, save_path=os.path.join(self.figures_dir, "llm_noise_paradigm.pdf")
+            )
+            logger.info("Generated llm_noise_paradigm.pdf")
+        except Exception as e:
+            logger.warning(f"Could not generate LLM noise paradigm figure: {e}")
+
+        # Methodology x application field matrix (Title/Abstract heuristics)
+        try:
+            self.viz.plot_method_application_matrix(
+                df_pd, save_path=os.path.join(self.figures_dir, "method_application_matrix.pdf")
+            )
+            logger.info("Generated method_application_matrix.pdf")
+        except Exception as e:
+            logger.warning(f"Could not generate methodology x application matrix figure: {e}")

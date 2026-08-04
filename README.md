@@ -82,9 +82,20 @@ To keep Git tracking lightweight and clean, the repository is structured as:
 
 ## Getting Started
 
-The pipeline runs directly on your machine's hardware using **`uv`** (fast package manager) or standard **`pip`**.
+The pipeline can run directly on your machine's hardware or via a GPU-accelerated container. For large datasets, **it is highly advisable to use Podman and NVIDIA RAPIDS (`cudf`, `cugraph`)** to accelerate network clustering and partitioning operations on the GPU.
 
-### 1. Run the Web App (Frontend + Backend)
+### 1. GPU Acceleration via Podman (Recommended for Large Datasets)
+To run the analysis inside a GPU-accelerated container with RAPIDS:
+```bash
+# Execute the pipeline with GPU resources mapped to the container:
+podman run -it --rm --device nvidia.com/gpu=all -v .:/app:z biblio-pipeline --query "brain-computer interface" --limit 200 --start-year 2020 --end-year 2025
+```
+Alternatively, you can run the full analysis using the configured `Makefile` target:
+```bash
+make container-pipeline
+```
+
+### 2. Run the Web App (Frontend + Backend)
 Run the unified, cross-platform runner script at the root:
 ```bash
 python run_local.py
@@ -93,7 +104,7 @@ This script will automatically resolve Python and Node.js dependencies, link you
 - **FastAPI backend** on [http://localhost:8000](http://localhost:8000)
 - **Next.js dashboard** on [http://localhost:3000](http://localhost:3000)
 
-### 2. Run the CLI Scraper & Pipeline
+### 3. Run the CLI Scraper & Pipeline Locally (CPU Fallback)
 You can run autonomous collections or execute the analysis pipeline on local files using the `biblio-pipeline` command:
 
 #### A. Fetch papers and run analysis (Autonomous mode)
