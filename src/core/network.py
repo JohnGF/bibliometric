@@ -98,6 +98,7 @@ class NetworkAnalysis:
         edges_pdf['source_id'] = edges_pdf['source'].map(author_to_id)
         edges_pdf['dest_id'] = edges_pdf['destination'].map(author_to_id)
 
+        gpu_success = False
         if self.use_gpu:
             try:
                 import cupy
@@ -109,53 +110,54 @@ class NetworkAnalysis:
             except Exception as e:
                 logging.warning(f"Could not query GPU memory info: {e}")
 
-            logging.info("NetworkAnalysis: Running GPU-accelerated co-authorship analysis (cuGraph/cuDF)...")
-            edges_gdf = cudf.from_pandas(edges_pdf[['source_id', 'dest_id', 'weight']])
-            self.graph = cugraph.Graph()
-            self.graph.from_cudf_edgelist(edges_gdf, source='source_id', destination='dest_id', edge_attr='weight')
-            partition, _ = cugraph.louvain(self.graph)
-            pagerank = cugraph.pagerank(self.graph)
-            degree = cugraph.degree_centrality(self.graph)
+            try:
+                logging.info("NetworkAnalysis: Running GPU-accelerated co-authorship analysis (cuGraph/cuDF)...")
+                edges_gdf = cudf.from_pandas(edges_pdf[['source_id', 'dest_id', 'weight']])
+                self.graph = cugraph.Graph()
+                self.graph.from_cudf_edgelist(edges_gdf, source='source_id', destination='dest_id', edge_attr='weight')
+                partition, _ = cugraph.louvain(self.graph)
+                pagerank = cugraph.pagerank(self.graph)
+                degree = cugraph.degree_centrality(self.graph)
 
-            partition = partition.merge(pagerank, on='vertex')
-            partition = partition.merge(degree, on='vertex')
-            
-            if len(unique_authors) <= 3000:
-                try:
-                    betweenness = cugraph.betweenness_centrality(self.graph, k=min(100, len(unique_authors)))
-                    partition = partition.merge(betweenness, on='vertex', how='left')
-                except Exception as e:
-                    logging.warning(f"GPU betweenness centrality skipped ({e}). Louvain, PageRank, and Degree running on GPU.")
-                    partition['betweenness_centrality'] = 0.0
-            else:
-                logging.info("Running Component-Decomposition Sampling for GPU betweenness centrality (>3000 nodes)...")
-                try:
-                    # Component decomposition sampling to prevent CUDA Brandes queue memory crash
-                    comps = cugraph.connected_components(self.graph)
-                    comp_counts = comps['labels'].value_counts()
-                    # Find vertices in significant components
-                    major_labels = comp_counts[comp_counts > 2].index.to_pandas().tolist()
-                    
-                    if major_labels:
-                        # Extract major component subgraph
-                        major_vertices = comps[comps['labels'].isin(major_labels)]['vertex']
-                        sub_gdf = edges_gdf[edges_gdf['source_id'].isin(major_vertices) & edges_gdf['dest_id'].isin(major_vertices)]
-                        if not sub_gdf.empty:
-                            sub_g = cugraph.Graph()
-                            sub_g.from_cudf_edgelist(sub_gdf, source='source_id', destination='dest_id', edge_attr='weight')
-                            betweenness = cugraph.betweenness_centrality(sub_g, k=min(100, len(major_vertices)))
-                            partition = partition.merge(betweenness, on='vertex', how='left')
-                            partition['betweenness_centrality'] = partition['betweenness_centrality'].fillna(0.0)
+                partition = partition.merge(pagerank, on='vertex')
+                partition = partition.merge(degree, on='vertex')
+                
+                if len(unique_authors) <= 3000:
+                    try:
+                        betweenness = cugraph.betweenness_centrality(self.graph, k=min(100, len(unique_authors)))
+                        partition = partition.merge(betweenness, on='vertex', how='left')
+                    except Exception as e:
+                        logging.warning(f"GPU betweenness centrality skipped ({e}). Louvain, PageRank, and Degree running on GPU.")
+                        partition['betweenness_centrality'] = 0.0
+                else:
+                    logging.info("Running Component-Decomposition Sampling for GPU betweenness centrality (>3000 nodes)...")
+                    try:
+                        comps = cugraph.connected_components(self.graph)
+                        comp_counts = comps['labels'].value_counts()
+                        major_labels = comp_counts[comp_counts > 2].index.to_pandas().tolist()
+                        
+                        if major_labels:
+                            major_vertices = comps[comps['labels'].isin(major_labels)]['vertex']
+                            sub_gdf = edges_gdf[edges_gdf['source_id'].isin(major_vertices) & edges_gdf['dest_id'].isin(major_vertices)]
+                            if not sub_gdf.empty:
+                                sub_g = cugraph.Graph()
+                                sub_g.from_cudf_edgelist(sub_gdf, source='source_id', destination='dest_id', edge_attr='weight')
+                                betweenness = cugraph.betweenness_centrality(sub_g, k=min(100, len(major_vertices)))
+                                partition = partition.merge(betweenness, on='vertex', how='left')
+                                partition['betweenness_centrality'] = partition['betweenness_centrality'].fillna(0.0)
+                            else:
+                                partition['betweenness_centrality'] = 0.0
                         else:
                             partition['betweenness_centrality'] = 0.0
-                    else:
+                    except Exception as e:
+                        logging.warning(f"Component betweenness sampling fallback triggered ({e}).")
                         partition['betweenness_centrality'] = 0.0
-                except Exception as e:
-                    logging.warning(f"Component betweenness sampling fallback triggered ({e}).")
-                    partition['betweenness_centrality'] = 0.0
-            # Note: layout coordinates (x, y) are computed smoothly during visualization in viz.py
-            # to avoid cuGraph C++ CUDA ForceAtlas2 memory segfaults on disconnected graphs.
-        else:
+                gpu_success = True
+            except Exception as gpu_err:
+                logging.warning(f"GPU cuGraph calculation encountered error: {gpu_err}. Falling back to CPU graph engine.")
+                gpu_success = False
+
+        if not gpu_success:
             logging.info("NetworkAnalysis: Running CPU-mode co-authorship analysis (NetworkX)...")
             edges_pdf_cpu = edges_pdf[['source_id', 'dest_id', 'weight']]
             nx_graph = nx.from_pandas_edgelist(edges_pdf_cpu, source='source_id', target='dest_id', edge_attr='weight')

@@ -1344,3 +1344,143 @@ class Visualization:
             plt.savefig(save_path, dpi=300)
             plt.close()
         return plt.gcf()
+
+    def plot_forest(self, df: pd.DataFrame, meta_results: dict, effect_col="meta_effect_size_d", var_col="v_i", save_path: str = None):
+        """Generates a Forest Plot for meta-analysis results."""
+        if df.empty or effect_col not in df.columns or var_col not in df.columns:
+            return None
+
+        fig, ax = plt.subplots(figsize=(10, len(df) * 0.4 + 2))
+
+        y_pos = __import__('numpy').arange(len(df))
+        effects = df[effect_col].values
+        ci_lower = effects - 1.96 * __import__('numpy').sqrt(df[var_col].values)
+        ci_upper = effects + 1.96 * __import__('numpy').sqrt(df[var_col].values)
+
+        # Plot study lines
+        ax.errorbar(effects, y_pos, xerr=[effects - ci_lower, ci_upper - effects], fmt='o', color='black', ecolor='gray', capsize=0, label='Studies')
+
+        # Plot summary diamond (Random Effects)
+        if "random_effects" in meta_results:
+            re = meta_results["random_effects"]
+            re_est = re["estimate"]
+            re_lower = re["ci_lower"]
+            re_upper = re["ci_upper"]
+
+            diamond_x = [re_lower, re_est, re_upper, re_est]
+            diamond_y = [-1.5, -1.2, -1.5, -1.8]
+            ax.add_patch(plt.Polygon(list(zip(diamond_x, diamond_y)), color='red', label='Random Effects Summary'))
+            ax.axvline(re_est, color='red', linestyle='--', alpha=0.5)
+
+        ax.axvline(0, color='black', linestyle='-')
+        ax.set_yticks(y_pos)
+
+        # Add labels
+        if 'Authors' in df.columns and 'Year' in df.columns:
+            labels = [f"{str(row.get('Authors', '')).split(';')[0]} ({row.get('Year', '')})" for _, row in df.iterrows()]
+        else:
+            labels = [f"Study {i+1}" for i in range(len(df))]
+
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()  # top-to-bottom
+        ax.set_xlabel('Effect Size')
+        ax.set_title('Forest Plot')
+
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300)
+            png_path = save_path.replace('.pdf', '.png')
+            plt.savefig(png_path, dpi=300)
+            plt.close()
+        return fig
+
+    def plot_funnel(self, df: pd.DataFrame, effect_col="meta_effect_size_d", var_col="v_i", save_path: str = None):
+        """Generates a Funnel Plot for publication bias evaluation."""
+        if df.empty or effect_col not in df.columns or var_col not in df.columns:
+            return None
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        effects = df[effect_col].values
+        se = __import__('numpy').sqrt(df[var_col].values)
+
+        # Plot studies
+        ax.scatter(effects, se, alpha=0.6, color='blue', edgecolors='black')
+
+        # Plot pseudo 95% confidence limits based on pooled estimate
+        pooled_effect = __import__('numpy').average(effects, weights=1/df[var_col].values)
+
+        max_se = __import__('numpy').max(se) * 1.1
+        y_vals = __import__('numpy').linspace(0, max_se, 100)
+        # 1.96 * SE gives the 95% limit at that specific standard error level
+        x_left = pooled_effect - 1.96 * y_vals
+        x_right = pooled_effect + 1.96 * y_vals
+
+        ax.plot(x_left, y_vals, 'k--', alpha=0.7)
+        ax.plot(x_right, y_vals, 'k--', alpha=0.7)
+        ax.axvline(pooled_effect, color='black', linestyle='-', alpha=0.8)
+
+        ax.set_ylim(max_se, 0)  # Invert y-axis (0 SE at top)
+        ax.set_xlabel('Effect Size')
+        ax.set_ylabel('Standard Error')
+        ax.set_title('Funnel Plot')
+
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300)
+            png_path = save_path.replace('.pdf', '.png')
+            plt.savefig(png_path, dpi=300)
+            plt.close()
+        return fig
+
+    def plot_prisma_flowchart(self, metrics: dict, save_path: str = None):
+        """Generates a PRISMA 2020 Flow Diagram using matplotlib."""
+        fig, ax = plt.subplots(figsize=(8, 10))
+        ax.axis('off')
+
+        box_width = 0.6
+        box_height = 0.12
+        x_center = 0.5
+
+        identified = metrics.get("identified", 0)
+        screened = metrics.get("screened", 0)
+        eligible = metrics.get("eligible", 0)
+        included = metrics.get("included", 0)
+
+        boxes = [
+            (f"Identification\n(n = {identified})", 0.9),
+            (f"Screening\n(n = {screened})", 0.65),
+            (f"Eligibility\n(n = {eligible})", 0.4),
+            (f"Included\n(n = {included})", 0.15)
+        ]
+
+        for text, y in boxes:
+            rect = plt.Rectangle((x_center - box_width/2, y - box_height/2), box_width, box_height,
+                                 fill=True, facecolor='#EAEAF2', edgecolor='black', zorder=2)
+            ax.add_patch(rect)
+            ax.text(x_center, y, text, ha='center', va='center', fontsize=12, zorder=3)
+
+        arrow_props = dict(facecolor='black', edgecolor='black', width=2, headwidth=8)
+        ax.annotate('', xy=(x_center, 0.65 + box_height/2), xytext=(x_center, 0.9 - box_height/2), arrowprops=arrow_props)
+        ax.annotate('', xy=(x_center, 0.4 + box_height/2), xytext=(x_center, 0.65 - box_height/2), arrowprops=arrow_props)
+        ax.annotate('', xy=(x_center, 0.15 + box_height/2), xytext=(x_center, 0.4 - box_height/2), arrowprops=arrow_props)
+
+        if "exclusion_reasons" in metrics:
+            exc = metrics["exclusion_reasons"]
+            total_exc = sum(exc.values())
+            if total_exc > 0:
+                exc_text = f"Records excluded\n(n = {total_exc})"
+                rect = plt.Rectangle((0.75, 0.65 - box_height/2), box_width/1.5, box_height,
+                                     fill=True, facecolor='#F2EAEA', edgecolor='black', zorder=2)
+                ax.add_patch(rect)
+                ax.text(0.75 + box_width/3, 0.65, exc_text, ha='center', va='center', fontsize=10, zorder=3)
+                ax.annotate('', xy=(0.75, 0.65), xytext=(x_center + box_width/2, 0.65), arrowprops=arrow_props)
+
+        plt.title('PRISMA 2020 Flow Diagram', fontsize=16)
+
+        if save_path:
+            plt.savefig(save_path, dpi=300)
+            png_path = save_path.replace('.pdf', '.png')
+            plt.savefig(png_path, dpi=300)
+            plt.close()
+        return fig

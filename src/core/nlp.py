@@ -83,6 +83,9 @@ class BERTopicPipeline:
         device = "cuda" if HAS_TORCH_CUDA else "cpu"
         logging.info(f"BERTopic: Fitting model using {device} (RAPIDS accelerated: {HAS_RAPIDS_CUML})")
         
+        from sklearn.feature_extraction.text import CountVectorizer
+        vectorizer_model = CountVectorizer(stop_words="english", min_df=2, ngram_range=(1, 2))
+
         if HAS_RAPIDS_CUML:
             # RAPIDS-accelerated pipeline
             umap_model = UMAP(n_components=5, n_neighbors=15, min_dist=0.0)
@@ -91,11 +94,16 @@ class BERTopicPipeline:
                 embedding_model=self.model_name, 
                 umap_model=umap_model, 
                 hdbscan_model=hdbscan_model,
+                vectorizer_model=vectorizer_model,
                 calculate_probabilities=True
             )
         else:
             # Standard CPU pipeline (BERTopic handles default UMAP/HDBSCAN)
-            self.topic_model = BERTopic(embedding_model=self.model_name, calculate_probabilities=True)
+            self.topic_model = BERTopic(
+                embedding_model=self.model_name,
+                vectorizer_model=vectorizer_model,
+                calculate_probabilities=True
+            )
         
         topics, probs = self.topic_model.fit_transform(docs)
         return topics, probs
