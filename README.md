@@ -1,149 +1,135 @@
-# Bibliometric Research Pipeline
+# Bibliometric, Systematic Review & Meta-Analysis Research Pipeline
 
-A modular, schema-driven Python pipeline for advanced bibliometric research. It supports autonomous metadata scraping, cross-source deduplication, dynamic keyword CAGR analysis, NLP-based topic clustering (BERTopic), and co-authorship network visualization.
+A modular, schema-driven Python pipeline for academic literature research. It provides three specialized operational modes:
+1. **Bibliometrics & Macro Scientometrics (`biblio`)**: Autonomous metadata scraping, co-authorship community graphs, citation PageRank, BERTopic modeling, and IEEEtran manuscript generation.
+2. **Qualitative PRISMA Systematic Reviews (`systematic`)**: PICOS inclusion/exclusion screening, audit tracking, PRISMA 2020 flowcharts, and SLR synthesis.
+3. **Quantitative Empirical Meta-Analysis (`meta`)**: High-throughput async PDF retrieval, multi-domain variable extraction (Economics, Biomedical, Engineering), DerSimonian–Laird random-effects pooling, Forest plots, Funnel plots, and PRISMA meta-analysis manuscript compilation.
 
-## Key Features
-
-- **Autonomous Collection**: Query and fetch papers across multiple metadata APIs (OpenAlex, Semantic Scholar, and Crossref) with page-based pagination.
-- **Smart Merge Deduplication**: Cleans and combines duplicate hits using normalized DOIs and Titles, ensuring no metadata (abstracts, affiliations, or keywords) is discarded.
-- **Dynamic Topic Modeling**: Employs BERTopic to identify core research topics from paper abstracts.
-- **Network Analysis**: Generates interactive and static co-authorship networks with community Louvain partitioning and PageRank scoring.
-- **Geographic & Keyword CAGR Trends**: Tracks the chronological evolution of countries and research keyword growth.
-- **Modern Web Dashboard**: Features a fast FastAPI backend and a Next.js (React) visualization panel.
+---
 
 ## System Architecture
 
 ```mermaid
 flowchart TD
     %% Inputs
-    subgraph Inputs ["Data Inputs"]
-        in_query["Search Query & Year Range"]
-        in_file["Local CSV / Parquet File"]
+    subgraph Inputs ["1. Data Inputs"]
+        in_query["Search Query & Filters"]
+        in_file["Local Dataset (CSV / Parquet)"]
     end
 
-    %% Collectors
-    subgraph Scraping ["Autonomous Scraping (UnifiedCollector)"]
-        api_oa["OpenAlex API"]
-        api_ss["Semantic Scholar API"]
-        api_cr["Crossref API"]
+    %% Shared Foundations
+    subgraph Core ["2. Shared Core Infrastructure"]
+        scraping["Unified Multi-Source Collectors\n(OpenAlex, Crossref, Scopus, IEEE, PubMed, arXiv)"]
+        ingest["Pydantic Schema Ingestion & Smart Deduplication"]
+        profiler["PipelineProfiler (Latency Tracking)"]
+        retriever["Async Parallel PDF Retriever & Cache"]
     end
 
-    %% Core Pipeline Processes
-    subgraph Core ["Ingestion & Verification"]
-        pydantic_val["Pydantic Schema Validation"]
-        dedup["Title/DOI Normalization & Metadata Merging"]
-        year_filter["Null-Year Filtering"]
+    %% Mode Selection & Dispatcher
+    subgraph Dispatcher ["3. Pipeline Mode Dispatcher (--mode)"]
+        mode_biblio["Mode: 'biblio'\n(Scientometrics)"]
+        mode_slr["Mode: 'systematic'\n(PRISMA Review)"]
+        mode_meta["Mode: 'meta'\n(Meta-Analysis)"]
     end
 
-    %% Analysis Blocks
-    subgraph Processors ["Modular Analysis Engines"]
-        nlp_proc["NLP Engine (BERTopic)"]
-        country_proc["Country Analysis"]
-        net_proc["Network Analysis (cuGraph GPU / NetworkX CPU)"]
-        citation_proc["Citation Analysis (Co-Citation & Coupling)"]
+    %% Specialized Pipelines
+    subgraph BiblioPipeline ["4A. Bibliometric Pipeline"]
+        b_nlp["GPU BERTopic NLP & Keyword CAGR"]
+        b_net["Co-Authorship Graphs (cuGraph / NetworkX)"]
+        b_cit["Co-Citation PageRank & Coupling"]
+        b_doc["IEEEtran Paper Scaffold\n(paper_scaffold_onecolumn.pdf)"]
     end
 
-    %% Outputs
-    subgraph DataOutputs ["Generated Data & Reports (pipeline_results/)"]
-        out_csv["Cleaned CSV / Parquet Datasets"]
-        out_plots["Trend PDF Plots (CAGR, Growth, Evolution)"]
-        out_net["Network Graphs (Co-authorship, percolation)"]
+    subgraph SystematicPipeline ["4B. Systematic Review Pipeline"]
+        s_picos["PICOS Eligibility & Screening"]
+        s_flow["PRISMA 2020 Flow Diagram"]
+        s_tax["Domain Thematic Taxonomy"]
+        s_doc["PRISMA SLR Manuscript\n(slr_paper_scaffold_onecolumn.pdf)"]
     end
 
-    subgraph WebDashboard ["Dashboard UI"]
-        web_app["Next.js Web Panel (Interactive Networks & Insights)"]
+    subgraph MetaPipeline ["4C. Quantitative Meta-Analysis Pipeline"]
+        m_parse["PDF Section & Table Parsing (PyMuPDF)"]
+        m_ext["Multi-Domain Variable Extractor\n(Economics beta/%, Clinical d/OR, ML Acc/SNR)"]
+        m_stat["DerSimonian-Laird Random Effects\n(Tau^2, I^2, Cochran's Q, Egger Bias)"]
+        m_viz["Forest Plots & Funnel Plots"]
+        m_doc["PRISMA Meta-Analysis Manuscript\n(meta_paper_scaffold_onecolumn.pdf)"]
     end
 
-    %% Data Flow Connections
-    in_query --> Scraping
-    api_oa & api_ss & api_cr --> dedup
-    in_file --> pydantic_val
-    dedup --> pydantic_val
-    pydantic_val --> year_filter
+    %% Connections
+    in_query --> scraping --> ingest
+    in_file --> ingest
+    ingest --> Dispatcher
 
-    year_filter --> nlp_proc & country_proc & net_proc & citation_proc
-
-    nlp_proc --> out_plots & out_csv
-    country_proc --> out_plots & out_csv
-    net_proc --> out_net & out_csv
-    citation_proc --> out_net & out_csv
-
-    out_csv & out_plots & out_net --> WebDashboard
+    Dispatcher -->|--mode biblio| mode_biblio --> b_nlp & b_net & b_cit --> b_doc
+    Dispatcher -->|--mode systematic| mode_slr --> s_picos --> s_flow & s_tax --> s_doc
+    Dispatcher -->|--mode meta| mode_meta --> retriever --> m_parse --> m_ext --> m_stat --> m_viz --> m_doc
 ```
-
-## Project Structure
-To keep Git tracking lightweight and clean, the repository is structured as:
-- `/src`: Core source code (API, pipeline orchestration, viz, collectors, network engines).
-- `/notebooks`: Contains research Jupyter notebooks (`Authors`, `Citations`, `Keyword`, etc.).
-- `/scripts`: Miscellaneous scripts and classifiers.
-- `/data` & `/pipeline_results`: Ignored directories for fetched raw datasets and run plots/graphs.
 
 ---
 
-## Getting Started
+## Operational Modes & Workflow Commands
 
-The pipeline can run directly on your machine's hardware or via a GPU-accelerated container. For large datasets, **it is highly advisable to use Podman and NVIDIA RAPIDS (`cudf`, `cugraph`)** to accelerate network clustering and partitioning operations on the GPU.
+### 1. Quantitative Meta-Analysis Mode (`--mode meta`)
+Extracts empirical effect sizes, executes random-effects pooling, renders Forest/Funnel plots, and compiles a PRISMA meta-analysis paper:
+```bash
+# Direct on dataset:
+uv run biblio-pipeline --file data/collected_rent_control.csv --mode meta --output results_meta
 
-### 1. GPU Acceleration via Podman (Recommended for Large Datasets)
-To run the analysis inside a GPU-accelerated container with RAPIDS:
-```bash
-# Execute the pipeline with GPU resources mapped to the container:
-podman run -it --rm --device nvidia.com/gpu=all -v .:/app:z biblio-pipeline --query "brain-computer interface" --limit 200 --start-year 2020 --end-year 2025
-```
-Alternatively, you can run the full analysis using the configured `Makefile` target:
-```bash
-make container-pipeline
+# Autonomous search & meta-analysis:
+uv run biblio-pipeline --query "rent control" --mode meta --limit 100 --output results_meta
 ```
 
-### 2. Run the Web App (Frontend + Backend)
-Run the unified, cross-platform runner script at the root:
+### 2. Systematic Literature Review Mode (`--mode systematic`)
+Evaluates studies against PICOS criteria, generates PRISMA 2020 flow diagrams, and compiles an SLR manuscript:
+```bash
+uv run biblio-pipeline --file data/collected_rent_control.csv --mode systematic --output results_slr
+```
+
+### 3. Bibliometric Mode (`--mode biblio`)
+Analyzes macro scientometrics, co-authorship networks, citation structure, and keyword trends:
+```bash
+# Host CPU/PyTorch execution:
+uv run biblio-pipeline --query "brain-computer interface" --mode biblio --limit 200
+
+# GPU Acceleration with Podman (NVIDIA RAPIDS cuGraph):
+podman run -i --rm --ipc=host --device nvidia.com/gpu=all -v .:/app:z biblio-pipeline \
+  --query "brain-computer interface" --mode biblio --limit 200
+```
+
+---
+
+## Multi-Domain Quantitative Extraction Engine
+
+The variable extractor ([`src/core/extraction.py`](src/core/extraction.py)) dynamically adapts to scientific fields and standardizes reported findings into universal effect sizes ($d$):
+
+| Scientific Domain | Extracted Primary Variables | Mathematical Standardization |
+| :--- | :--- | :--- |
+| **Economics & Policy** *(e.g., Rent Control, Minimum Wage)* | Regression $\beta$, Standard Error $SE(\beta)$, $\% \Delta$, Elasticity $\epsilon$, $t$-stat | $d \approx \frac{2 \cdot t}{\sqrt{N}}$ where $t = \frac{\beta}{SE(\beta)}$ |
+| **Biomedical & Clinical** *(e.g., Clinical Trials, Therapies)* | Sample sizes $N_1, N_2$, Mean $\pm$ SD, Odds Ratio (OR), Risk Ratio (RR) | $d = \frac{\ln(\text{OR}) \cdot \sqrt{3}}{\pi}$ (Chinn conversion) |
+| **Computer Science & ML** *(e.g., EEG/BCI, Neural Networks)* | Accuracy $\% \Delta$, F1-score, Area Under Curve (AUC), SNR (dB) | $d \approx (\text{Accuracy} - 0.50) \times 2.5$ |
+
+---
+
+## Web Dashboard & Interactive Analysis
+
+Run the full-stack dashboard (FastAPI backend + Next.js frontend) directly on your hardware:
 ```bash
 python run_local.py
 ```
-This script will automatically resolve Python and Node.js dependencies, link your environment, and spin up:
-- **FastAPI backend** on [http://localhost:8000](http://localhost:8000)
-- **Next.js dashboard** on [http://localhost:3000](http://localhost:3000)
-
-### 3. Run the CLI Scraper & Pipeline Locally (CPU Fallback)
-You can run autonomous collections or execute the analysis pipeline on local files using the `biblio-pipeline` command:
-
-#### A. Fetch papers and run analysis (Autonomous mode)
-```bash
-# Universal (using the local virtualenv)
-.venv/bin/biblio-pipeline --query "brain-computer interface" --limit 200 --start-year 2020 --end-year 2025
-
-# Modern Alternative (if you have 'uv' installed)
-uv run biblio-pipeline --query "brain-computer interface" --limit 200 --start-year 2020 --end-year 2025
-```
-
-#### B. Run analysis on a local dataset file (e.g. CSV/Parquet output from scrapers)
-This generates the yearly growth charts, country collaborations, BERTopic clusters, and co-authorship graphs:
-```bash
-# Universal (using the local virtualenv)
-.venv/bin/biblio-pipeline --file data/collected_brain-computer_interface.csv
-
-# Modern Alternative (if you have 'uv' installed)
-uv run biblio-pipeline --file data/collected_brain-computer_interface.csv
-```
-Outputs (PDFs, CSVs, and interactive network files) will be written directly to the `pipeline_results/` directory.
+- **Backend API**: [http://localhost:8000](http://localhost:8000)
+- **Frontend Dashboard**: [http://localhost:3000](http://localhost:3000)
 
 ---
 
 ## Citation
 
-If you use this repository or pipeline in your research, please cite it as:
+If you use this pipeline in your research, please cite it as:
 
-### APA Format
-```text
-GF, J. (2026). bibliometric (Version 0.1.0) [Computer software]. https://github.com/JohnGF/bibliometric
-```
-
-### BibTeX Format
 ```bibtex
 @software{GF_bibliometric_2026,
   author = {GF, John},
-  title = {bibliometric},
-  version = {0.1.0},
+  title = {bibliometric: Modular Bibliometric, Systematic Review & Meta-Analysis Pipeline},
+  version = {0.2.0},
   url = {https://github.com/JohnGF/bibliometric},
   year = {2026}
 }
