@@ -140,3 +140,28 @@ def test_meta_analysis_visualizations(tmp_path):
     fig_prisma = viz.plot_prisma_flowchart(prisma_metrics, save_path=prisma_pdf)
     assert fig_prisma is not None
     assert os.path.exists(prisma_pdf)
+
+def test_pdf_retriever_filter_candidates():
+    from src.core.fulltext.retriever import PDFRetriever
+    retriever = PDFRetriever()
+    
+    df = pd.DataFrame([
+        {"Title": "Paper A", "DOI": "10.1016/j.a", "Cite Count": 15, "Author Keywords": "EEG; Noise removal", "relevance_score": 0.8},
+        {"Title": "Paper B", "DOI": "10.1109/j.b", "Cite Count": 2, "Author Keywords": "fMRI; vision", "relevance_score": 0.2},
+        {"Title": "Paper C", "DOI": "10.1038/j.c", "Cite Count": 50, "Author Keywords": "BCI; artifact reduction", "relevance_score": 0.9},
+    ])
+    
+    # Test citation filter
+    cands_cit = retriever.filter_candidates(df, min_citations=10)
+    assert len(cands_cit) == 2
+    assert "Paper B" not in cands_cit["Title"].values
+    
+    # Test keywords filter
+    cands_kw = retriever.filter_candidates(df, required_keywords=["noise", "artifact"])
+    assert len(cands_kw) == 2
+    assert "Paper B" not in cands_kw["Title"].values
+    
+    # Test max_papers limit
+    cands_max = retriever.filter_candidates(df, max_papers=1)
+    assert len(cands_max) == 1
+    assert cands_max.iloc[0]["Title"] == "Paper C"
