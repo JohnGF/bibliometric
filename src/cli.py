@@ -45,6 +45,10 @@ def main():
 
     parser.add_argument("--interactive", "-i", action="store_true", help="Launch interactive graph parameter editor REPL session")
 
+    # Meta-Analysis Options
+    parser.add_argument("--meta-analysis", action="store_true", help="Run full-text PDF parsing, extraction, and meta-analysis stats")
+    parser.add_argument("--picos-config", type=str, help="Path to PICOS configuration JSON file")
+
     args = parser.parse_args()
 
     if args.interactive:
@@ -83,6 +87,8 @@ def main():
     config["skip_cagr"] = args.skip_cagr
     config["skip_country"] = args.skip_country
     config["skip_percolation"] = args.skip_percolation
+    config["meta_analysis"] = args.meta_analysis
+    config["picos_config"] = args.picos_config
 
 
     manager = PipelineManager(output_dir=args.output, config=config)

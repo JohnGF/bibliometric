@@ -64,6 +64,53 @@ class PipelineManager:
         print(">>> [STAGE 3] Running main analytical pipeline...")
         self.analysis_orch.run_analysis(df_pd, refs_path)
 
+        if self.config.get("meta_analysis", False):
+            print(">>> [STAGE 3.5] Running Meta-Analysis Pipeline...")
+            try:
+                import json
+                from src.core.fulltext.retriever import PDFRetriever
+                from src.core.fulltext.parser import PDFParser
+                from src.core.extraction import VariableExtractor
+                from src.core.meta_analysis import EffectSizeSynthesizer
+
+                # Retrieve and parse PDFs
+                retriever = PDFRetriever(cache_dir=os.path.join(self.output_dir, "data", "fulltext_cache"))
+                df_with_pdfs = retriever.retrieve_pdfs(df_pd)
+
+                parser = PDFParser()
+                df_parsed = parser.parse_dataframe(df_with_pdfs)
+
+                # Extract variables
+                extractor = VariableExtractor()
+                df_extracted = extractor.extract_dataframe(df_parsed)
+                df_extracted.to_csv(os.path.join(self.output_dir, "extracted_study_data.csv"), index=False)
+
+                # Run Meta-Analysis stats
+                synthesizer = EffectSizeSynthesizer()
+                meta_res, df_analyzed = synthesizer.run_meta_analysis(df_extracted)
+
+                with open(os.path.join(self.output_dir, "meta_analysis_results.json"), "w") as f:
+                    json.dump(meta_res, f, indent=4)
+
+                # Generate Plots
+                figures_dir = os.path.join(self.output_dir, "figures")
+                os.makedirs(figures_dir, exist_ok=True)
+
+                if not df_analyzed.empty:
+                    self.analysis_orch.viz.plot_forest(df_analyzed, meta_res, save_path=os.path.join(figures_dir, "forest_plot.pdf"))
+                    self.analysis_orch.viz.plot_funnel(df_analyzed, save_path=os.path.join(figures_dir, "funnel_plot.pdf"))
+
+                prisma_file = os.path.join(self.output_dir, "prisma_metrics.json")
+                if os.path.exists(prisma_file):
+                    with open(prisma_file, "r") as f:
+                        prisma_data = json.load(f)
+                    self.analysis_orch.viz.plot_prisma_flowchart(prisma_data, save_path=os.path.join(figures_dir, "prisma_flowchart.pdf"))
+
+                print(">>> [SUCCESS] Meta-Analysis Pipeline completed.")
+            except Exception as e:
+                print(f">>> [ERROR] Meta-Analysis Pipeline failed: {e}")
+                logger.exception("Meta-Analysis failure")
+
         # 4. Export stage
         print("\n>>> [STAGE 4] Exporting LaTeX table and manuscript templates...")
         try:
