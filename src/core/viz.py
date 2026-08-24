@@ -1345,17 +1345,27 @@ class Visualization:
             plt.close()
         return plt.gcf()
 
-    def plot_forest(self, df: pd.DataFrame, meta_results: dict, effect_col="meta_effect_size_d", var_col="v_i", save_path: str = None):
+    def plot_forest(self, df: pd.DataFrame, meta_results: dict, effect_col=None, var_col="v_i", save_path: str = None):
         """Generates a Forest Plot for meta-analysis results."""
-        if df.empty or effect_col not in df.columns or var_col not in df.columns:
+        if df.empty:
             return None
 
-        fig, ax = plt.subplots(figsize=(10, len(df) * 0.4 + 2))
+        # Resolve effect size column
+        eff_candidates = [c for c in [effect_col, "d_i", "meta_standardized_effect_d", "meta_effect_size_d"] if c and c in df.columns]
+        if not eff_candidates:
+            return None
+        actual_eff_col = eff_candidates[0]
+
+        if var_col not in df.columns:
+            return None
+
+        fig, ax = plt.subplots(figsize=(10, max(4, len(df) * 0.4 + 2)))
 
         y_pos = __import__('numpy').arange(len(df))
-        effects = df[effect_col].values
-        ci_lower = effects - 1.96 * __import__('numpy').sqrt(df[var_col].values)
-        ci_upper = effects + 1.96 * __import__('numpy').sqrt(df[var_col].values)
+        effects = pd.to_numeric(df[actual_eff_col], errors='coerce').values
+        variances = pd.to_numeric(df[var_col], errors='coerce').fillna(0.1).values
+        ci_lower = effects - 1.96 * __import__('numpy').sqrt(variances)
+        ci_upper = effects + 1.96 * __import__('numpy').sqrt(variances)
 
         # Plot study lines
         ax.errorbar(effects, y_pos, xerr=[effects - ci_lower, ci_upper - effects], fmt='o', color='black', ecolor='gray', capsize=0, label='Studies')
@@ -1363,9 +1373,9 @@ class Visualization:
         # Plot summary diamond (Random Effects)
         if "random_effects" in meta_results:
             re = meta_results["random_effects"]
-            re_est = re["estimate"]
-            re_lower = re["ci_lower"]
-            re_upper = re["ci_upper"]
+            re_est = re.get("estimate", 0.0)
+            re_lower = re.get("ci_lower", 0.0)
+            re_upper = re.get("ci_upper", 0.0)
 
             diamond_x = [re_lower, re_est, re_upper, re_est]
             diamond_y = [-1.5, -1.2, -1.5, -1.8]
@@ -1377,14 +1387,14 @@ class Visualization:
 
         # Add labels
         if 'Authors' in df.columns and 'Year' in df.columns:
-            labels = [f"{str(row.get('Authors', '')).split(';')[0]} ({row.get('Year', '')})" for _, row in df.iterrows()]
+            labels = [f"{str(row.get('Authors', '')).split(';')[0]} ({str(row.get('Year', '')).replace('.0','')})" for _, row in df.iterrows()]
         else:
             labels = [f"Study {i+1}" for i in range(len(df))]
 
         ax.set_yticklabels(labels)
         ax.invert_yaxis()  # top-to-bottom
-        ax.set_xlabel('Effect Size')
-        ax.set_title('Forest Plot')
+        ax.set_xlabel('Standardized Effect Size (d)')
+        ax.set_title('Meta-Analysis Forest Plot')
 
         plt.tight_layout()
         if save_path:
@@ -1394,25 +1404,34 @@ class Visualization:
             plt.close()
         return fig
 
-    def plot_funnel(self, df: pd.DataFrame, effect_col="meta_effect_size_d", var_col="v_i", save_path: str = None):
+    def plot_funnel(self, df: pd.DataFrame, effect_col=None, var_col="v_i", save_path: str = None):
         """Generates a Funnel Plot for publication bias evaluation."""
-        if df.empty or effect_col not in df.columns or var_col not in df.columns:
+        if df.empty:
+            return None
+
+        eff_candidates = [c for c in [effect_col, "d_i", "meta_standardized_effect_d", "meta_effect_size_d"] if c and c in df.columns]
+        if not eff_candidates:
+            return None
+        actual_eff_col = eff_candidates[0]
+
+        if var_col not in df.columns:
             return None
 
         fig, ax = plt.subplots(figsize=(8, 6))
 
-        effects = df[effect_col].values
-        se = __import__('numpy').sqrt(df[var_col].values)
+        effects = pd.to_numeric(df[actual_eff_col], errors='coerce').values
+        variances = pd.to_numeric(df[var_col], errors='coerce').fillna(0.1).values
+        se = __import__('numpy').sqrt(variances)
 
         # Plot studies
         ax.scatter(effects, se, alpha=0.6, color='blue', edgecolors='black')
 
         # Plot pseudo 95% confidence limits based on pooled estimate
-        pooled_effect = __import__('numpy').average(effects, weights=1/df[var_col].values)
+        weights = 1.0 / variances
+        pooled_effect = __import__('numpy').average(effects, weights=weights)
 
-        max_se = __import__('numpy').max(se) * 1.1
+        max_se = __import__('numpy').max(se) * 1.1 if len(se) > 0 else 1.0
         y_vals = __import__('numpy').linspace(0, max_se, 100)
-        # 1.96 * SE gives the 95% limit at that specific standard error level
         x_left = pooled_effect - 1.96 * y_vals
         x_right = pooled_effect + 1.96 * y_vals
 
@@ -1421,9 +1440,9 @@ class Visualization:
         ax.axvline(pooled_effect, color='black', linestyle='-', alpha=0.8)
 
         ax.set_ylim(max_se, 0)  # Invert y-axis (0 SE at top)
-        ax.set_xlabel('Effect Size')
+        ax.set_xlabel('Standardized Effect Size (d)')
         ax.set_ylabel('Standard Error')
-        ax.set_title('Funnel Plot')
+        ax.set_title('Funnel Plot with Pseudo 95% Confidence Limits')
 
         plt.tight_layout()
         if save_path:

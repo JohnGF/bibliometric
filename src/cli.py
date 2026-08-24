@@ -45,6 +45,9 @@ def main():
 
     parser.add_argument("--interactive", "-i", action="store_true", help="Launch interactive graph parameter editor REPL session")
 
+    # Pipeline Execution Mode
+    parser.add_argument("--mode", type=str, choices=["biblio", "systematic", "meta", "all"], default="biblio", help="Execution mode: 'biblio' (bibliometric), 'systematic' (PRISMA review), 'meta' (quantitative meta-analysis), or 'all'")
+
     # Meta-Analysis Options
     parser.add_argument("--meta-analysis", action="store_true", help="Run full-text PDF parsing, extraction, and meta-analysis stats")
     parser.add_argument("--picos-config", type=str, help="Path to PICOS configuration JSON file")
@@ -64,6 +67,7 @@ def main():
             active_query = " ".join(lines)
 
     config = {}
+    config["mode"] = args.mode
     if args.openalex_email: config["openalex_email"] = args.openalex_email
     if args.ss_api_key: config["ss_api_key"] = args.ss_api_key
     if args.crossref_email: config["crossref_email"] = args.crossref_email

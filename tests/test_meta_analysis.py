@@ -165,3 +165,45 @@ def test_pdf_retriever_filter_candidates():
     cands_max = retriever.filter_candidates(df, max_papers=1)
     assert len(cands_max) == 1
     assert cands_max.iloc[0]["Title"] == "Paper C"
+
+def test_multi_domain_variable_extraction():
+    extractor = VariableExtractor()
+    
+    # 1. Economics text
+    econ_text = "We evaluate the impact of rent control using Difference-in-Differences. In our sample of N = 15000 households, we find a decrease of 15% in rental housing supply, with regression beta = -0.14 and SE = 0.05. The price elasticity is -0.42."
+    econ_data = extractor.extract_from_text(econ_text)
+    assert econ_data.domain == "economics"
+    assert econ_data.sample_size == 15000
+    assert econ_data.percent_change == -15.0
+    assert econ_data.regression_beta == -0.14
+    assert econ_data.standard_error == 0.05
+    assert econ_data.elasticity == -0.42
+    assert econ_data.standardized_effect_d is not None
+    assert econ_data.effect_direction == "negative"
+    assert econ_data.has_control_group is True
+
+    # 2. Engineering text
+    eng_text = "We propose a novel deep learning architecture for EEG decoding. Tested on n=40 participants, the model achieved an accuracy of 94.2% and an SNR of +4.5 dB over the baseline."
+    eng_data = extractor.extract_from_text(eng_text)
+    assert eng_data.domain == "engineering"
+    assert eng_data.sample_size == 40
+    assert eng_data.accuracy == pytest.approx(0.942)
+    assert eng_data.snr_db == pytest.approx(4.5)
+    assert eng_data.standardized_effect_d > 0
+    assert eng_data.effect_direction == "positive"
+
+def test_orchestrators_isolated(tmp_path):
+    from src.orchestrators.systematic_orchestrator import SystematicReviewOrchestrator
+    from src.orchestrators.meta_orchestrator import MetaAnalysisOrchestrator
+    
+    df = pd.DataFrame([
+        {"Title": "Study 1", "Abstract": "Testing rent control with N = 500 households, finding a decrease of 10% in supply.", "DOI": "10.1000/1", "Cite Count": 10},
+        {"Title": "Study 2", "Abstract": "Evaluation of tenant protections with N = 300 units, showing beta = -0.12 and SE = 0.04.", "DOI": "10.1000/2", "Cite Count": 20},
+    ])
+    
+    # 1. Test Systematic Orchestrator
+    slr_out = str(tmp_path / "slr_out")
+    slr_orch = SystematicReviewOrchestrator(output_dir=slr_out)
+    metrics = slr_orch.run(df)
+    assert "identified" in metrics
+    assert os.path.exists(os.path.join(slr_out, "figures", "prisma_flowchart.pdf"))
