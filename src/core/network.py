@@ -28,45 +28,41 @@ except ImportError:
 
 import networkx as nx
 import community as community_louvain  # python-louvain
+from src.core.disambiguation import AuthorDisambiguator
 
 class NetworkAnalysis:
     def __init__(self, use_gpu: bool = True):
         self.use_gpu = use_gpu and HAS_GPU
         self.graph = None
         self.node_metadata = None
+        self.disambiguator = AuthorDisambiguator()
 
     def build_co_authorship_graph(self, df: pl.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        logging.info("Building co-authorship network...")
+        logging.info("Building co-authorship network with author & institution disambiguation...")
         
-        # Extract author-paper pairs
+        # Extract author-paper pairs with 1-to-1 affiliation and role matching
         author_paper_data = []
         for row in df.to_dicts():
             authors_val = row.get('Authors')
+            affils_val = row.get('Affiliations')
             if not authors_val:
                 continue
             
-            # Split, clean, and filter authors
-            authors = []
-            for a in str(authors_val).split(';'):
-                clean_a = a.strip().replace("\n", " ").replace("\r", " ")
-                # Skip empty, nan, none, or unknown names (case-insensitive)
-                if not clean_a or clean_a.lower() in ("nan", "none", "unknown"):
+            paper_id = row.get('DOI') or row.get('Title')
+            cite_cnt = row.get('Cite Count') or 0
+
+            pairs = self.disambiguator.pair_authors_and_affiliations(authors_val, affils_val)
+            for p in pairs:
+                clean_name = p["author_base_name"]
+                if not clean_name:
                     continue
-                authors.append(clean_a)
-                
-            for author in authors:
-                # Clean affiliation by stripping newlines to guarantee clean single-line CSV format
-                affil = row.get('Affiliations') or ""
-                if isinstance(affil, str):
-                    affil = affil.replace("\n", " ").replace("\r", " ").strip()
-                else:
-                    affil = ""
-                    
                 author_paper_data.append({
-                    'author_name': author,
-                    'paper_id': row.get('DOI') or row.get('Title'),
-                    'paper_cite_count': row.get('Cite Count') or 0,
-                    'affiliation': affil
+                    'author_name': clean_name,
+                    'author_id': p.get('author_id') or '',
+                    'paper_id': paper_id,
+                    'paper_cite_count': cite_cnt,
+                    'affiliation': p.get('affiliation') or '',
+                    'role': p.get('role') or 'coauthor'
                 })
         
         if not author_paper_data:
@@ -193,14 +189,16 @@ class NetworkAnalysis:
                 for k, v in partition_dict.items()
             ])
 
-        # Node metadata (metrics and affiliations)
+        # Node metadata (metrics, author roles, and affiliations)
         metrics = ap_df.group_by('author_name').agg([
             pl.col('paper_cite_count').sum().alias('total_citations'),
-            pl.col('paper_id').n_unique().alias('num_publications')
+            pl.col('paper_id').n_unique().alias('num_publications'),
+            (pl.col('role') == 'fa').sum().alias('first_author_count'),
+            (pl.col('role') == 'mp').sum().alias('last_author_count')
         ])
         
-        # Correctly aggregate affiliations: explode lists, then group and collect unique sorted values
-        affiliations = ap_df.explode('affiliation').group_by('author_name').agg([
+        # Correctly aggregate unique non-empty affiliations
+        affiliations = ap_df.filter(pl.col('affiliation') != "").group_by('author_name').agg([
             pl.col('affiliation').unique().sort().alias('affiliation_list')
         ]).with_columns([
             pl.col('affiliation_list').list.join("; ").alias('affiliations_str')
